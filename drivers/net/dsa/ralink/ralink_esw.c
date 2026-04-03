@@ -7,12 +7,157 @@
  */
 
 #include <linux/clk.h>
+#include <linux/of_mdio.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
 #include <net/dsa.h>
 
 #include "ralink_esw.h"
 
+static inline u32 ralink_esw_r32(struct ralink_esw *esw, u32 reg)
+{
+    return readl_relaxed(esw->base + reg);
+}
+
+static inline void ralink_esw_w32(struct ralink_esw *esw, u32 reg, u32 val)
+{
+    writel_relaxed(val, esw->base + reg);
+}
+
+/*
+ * PCR1.RD_RDY and PCR1.WT_DONE are read-clear completion bits.
+ * Read PCR1 before starting a transaction to drop any stale completion
+ * state, then read it again after completion to fetch data / acknowledge
+ * completion.
+ */
+static inline void ralink_esw_mdio_ack(struct ralink_esw *esw)
+{
+    ralink_esw_r32(esw, RALINK_ESW_PCR1);
+}
+
+static int ralink_esw_mdio_wait(struct ralink_esw *esw, u32 mask)
+{
+    u32 val;
+
+    return readl_poll_timeout(esw->base + RALINK_ESW_PCR1, val,
+                  val & mask, 1,
+                  RALINK_ESW_MDIO_TIMEOUT_US);
+}
+
+static int ralink_esw_phy_read(struct ralink_esw *esw, int phy, int reg, u16 *val)
+{
+    u32 pcr1;
+    int ret;
+
+    mutex_lock(&esw->mdio_lock);
+
+    ralink_esw_mdio_ack(esw);
+
+    ralink_esw_w32(esw, RALINK_ESW_PCR0,
+        RALINK_ESW_PCR0_RD_PHY_CMD |
+        FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
+        FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
+
+    ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_RD_RDY);
+    if (ret) {
+        dev_err(esw->dev, "MDIO read timeout: phy=%d reg=%d\n",
+            phy, reg);
+        goto out;
+    }
+
+    pcr1 = ralink_esw_r32(esw, RALINK_ESW_PCR1);
+    *val = FIELD_GET(RALINK_ESW_PCR1_RD_DATA, pcr1);
+
+out:
+    mutex_unlock(&esw->mdio_lock);
+
+    return ret;
+}
+
+static int ralink_esw_phy_write(struct ralink_esw *esw, int phy, int reg, u16 val)
+{
+    int ret;
+
+    mutex_lock(&esw->mdio_lock);
+
+    ralink_esw_mdio_ack(esw);
+
+    ralink_esw_w32(esw, RALINK_ESW_PCR0,
+        RALINK_ESW_PCR0_WT_PHY_CMD |
+        FIELD_PREP(RALINK_ESW_PCR0_WT_DATA, val) |
+        FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
+        FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
+
+    ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_WT_DONE);
+    if (ret) {
+        dev_err(esw->dev, "MDIO write timeout: phy=%d reg=%d\n",
+            phy, reg);
+        goto out;
+    }
+
+    ralink_esw_mdio_ack(esw);
+
+out:
+    mutex_unlock(&esw->mdio_lock);
+
+    return ret;
+}
+
+static int ralink_esw_mdio_bus_read(struct mii_bus *bus, int addr, int regnum)
+{
+    struct ralink_esw *esw = bus->priv;
+    u16 val;
+    int ret;
+
+    ret = ralink_esw_phy_read(esw, addr, regnum, &val);
+    if (ret)
+        return ret;
+
+    return val;
+}
+
+static int ralink_esw_mdio_bus_write(struct mii_bus *bus, int addr, int regnum,
+                  u16 val)
+{
+    struct ralink_esw *esw = bus->priv;
+
+    return ralink_esw_phy_write(esw, addr, regnum, val);
+}
+
+static int ralink_esw_mdio_register(struct ralink_esw *esw)
+{
+    struct device_node *mdio_np;
+    struct mii_bus *bus;
+    int ret;
+
+    mdio_np = of_get_child_by_name(esw->dev->of_node, "mdio");
+    if (!mdio_np)
+        return 0;
+
+    bus = devm_mdiobus_alloc(esw->dev);
+    if (!bus) {
+        of_node_put(mdio_np);
+        return -ENOMEM;
+    }
+
+    bus->name = "ralink-esw-mdio";
+    bus->read = ralink_esw_mdio_bus_read;
+    bus->write = ralink_esw_mdio_bus_write;
+    bus->parent = esw->dev;
+    bus->priv = esw;
+
+    strscpy(bus->id, dev_name(esw->dev), MII_BUS_ID_SIZE);
+
+    ret = devm_of_mdiobus_register(esw->dev, bus, mdio_np);
+    of_node_put(mdio_np);
+    if (ret)
+        return dev_err_probe(esw->dev, ret,
+                     "failed to register MDIO bus\n");
+
+    esw->mdio_bus = bus;
+
+    return 0;
+}
 
 static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
         /* stub for phylink_mac_ops */
@@ -82,6 +227,11 @@ static int ralink_esw_probe(struct platform_device *pdev)
     esw->ds->phylink_mac_ops = &ralink_esw_phylink_mac_ops;
 
     platform_set_drvdata(pdev, esw);
+
+    mutex_init(&esw->mdio_lock);
+    ret = ralink_esw_mdio_register(esw);
+    if (ret)
+        return ret;
 
     ret = dsa_register_switch(esw->ds);
     if (ret)
