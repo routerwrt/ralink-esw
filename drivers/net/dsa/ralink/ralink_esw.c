@@ -726,19 +726,45 @@ static int ralink_esw_port_pre_bridge_flags(struct dsa_switch *ds, int port,
 	return 0;
 }
 
+static void ralink_esw_port_stp_state_set(struct dsa_switch *ds, int port,
+					  u8 state)
+{
+	struct ralink_esw *esw = ds->priv;
+	u32 mask, set = 0;
+
+	if (!dsa_is_user_port(ds, port))
+		return;
+
+	mask = RALINK_ESW_POC1_BLOCKING_BIT(port) |
+	       RALINK_ESW_POC1_DIS_LRNING_BIT(port);
+
+	switch (state) {
+	case BR_STATE_DISABLED:
+	case BR_STATE_BLOCKING:
+	case BR_STATE_LISTENING:
+		set |= RALINK_ESW_POC1_BLOCKING_BIT(port);
+		set |= RALINK_ESW_POC1_DIS_LRNING_BIT(port);
+		break;
+	case BR_STATE_LEARNING:
+		set |= RALINK_ESW_POC1_BLOCKING_BIT(port);
+		break;
+	case BR_STATE_FORWARDING:
+		break;
+	default:
+		return;
+	}
+
+	ralink_esw_rmw(esw, RALINK_ESW_POC1, mask, set);
+}
+
 static void ralink_esw_port_set_learning(struct ralink_esw *esw,
 					 int port, bool enable)
 {
-	u32 val;
+	u32 mask = RALINK_ESW_POC1_DIS_LRNING_BIT(port);
 
-	val = ralink_esw_r32(esw, RALINK_ESW_POC2);
-
-	if (enable)
-		val &= ~BIT(RALINK_ESW_POC2_DIS_LRNING_SHIFT + port);
-	else
-		val |= BIT(RALINK_ESW_POC2_DIS_LRNING_SHIFT + port);
-
-	ralink_esw_w32(esw, RALINK_ESW_POC2, val);
+	ralink_esw_rmw(esw, RALINK_ESW_POC1,
+		       mask,
+		       enable ? 0 : mask);
 }
 
 static int ralink_esw_port_bridge_flags(struct dsa_switch *ds, int port,
@@ -771,6 +797,7 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .port_bridge_leave	= dsa_tag_8021q_bridge_leave,
         .port_pre_bridge_flags	= ralink_esw_port_pre_bridge_flags,
         .port_bridge_flags	= ralink_esw_port_bridge_flags,
+        .port_stp_state_set     = ralink_esw_port_stp_state_set,
 
         .tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
         .tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
