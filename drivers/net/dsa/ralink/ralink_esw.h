@@ -47,6 +47,9 @@
 #define RALINK_ESW_POA                     0x80
 #define RALINK_ESW_POA_LINK_SHIFT          25
 
+#define RALINK_ESW_POC0			   0x90
+#define RALINK_ESW_POC0_DIS_PORT_SHIFT	   23
+
 struct ralink_esw {
 	struct device *dev;
 	void __iomem *base;

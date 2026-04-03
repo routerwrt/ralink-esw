@@ -391,7 +391,37 @@ static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
 	.mac_link_up	= ralink_esw_mac_link_up,
 };
 
+static int ralink_esw_port_enable(struct dsa_switch *ds, int port,
+				  struct phy_device *phy)
+{
+	struct ralink_esw *esw = ds->priv;
+	u32 mask;
+
+	if (!dsa_is_user_port(ds, port))
+		return 0;
+
+	mask = BIT(RALINK_ESW_POC0_DIS_PORT_SHIFT + port);
+	ralink_esw_rmw(esw, RALINK_ESW_POC0, mask, 0);
+
+	return 0;
+}
+
+static void ralink_esw_port_disable(struct dsa_switch *ds, int port)
+{
+	struct ralink_esw *esw = ds->priv;
+	u32 mask;
+
+	if (!dsa_is_user_port(ds, port))
+		return;
+
+	mask = BIT(RALINK_ESW_POC0_DIS_PORT_SHIFT + port);
+	ralink_esw_rmw(esw, RALINK_ESW_POC0, mask, mask);
+}
+
 static const struct dsa_switch_ops ralink_esw_ops = {
+        .port_enable         = ralink_esw_port_enable,
+        .port_disable        = ralink_esw_port_disable,
+
         /* phylink */
         .phylink_get_caps    = ralink_esw_phylink_get_caps,
 };
