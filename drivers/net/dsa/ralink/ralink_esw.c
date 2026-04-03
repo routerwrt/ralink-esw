@@ -24,6 +24,16 @@ static inline void ralink_esw_w32(struct ralink_esw *esw, u32 reg, u32 val)
     writel_relaxed(val, esw->base + reg);
 }
 
+static inline void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set)
+{
+	u32 val = ralink_esw_r32(esw, reg);
+
+	val &= ~mask;
+	val |= (set & mask);
+
+	ralink_esw_w32(esw, val, reg);
+}
+
 /*
  * PCR1.RD_RDY and PCR1.WT_DONE are read-clear completion bits.
  * Read PCR1 before starting a transaction to drop any stale completion
@@ -159,12 +169,231 @@ static int ralink_esw_mdio_register(struct ralink_esw *esw)
     return 0;
 }
 
+static inline u32 ralink_esw_port_bit(unsigned int shift, unsigned int port)
+{
+	return BIT(shift + port);
+}
+
+static inline void
+ralink_esw_set_port_bit(struct ralink_esw *esw, u32 reg, unsigned int shift,
+			unsigned int port, bool enable)
+{
+	u32 mask = ralink_esw_port_bit(shift, port);
+
+	ralink_esw_rmw(esw, reg, mask, enable ? mask : 0);
+}
+
+static inline void
+ralink_esw_fpa_set_force_mode(struct ralink_esw *esw, unsigned int port, bool en)
+{
+	ralink_esw_set_port_bit(esw, RALINK_ESW_FPA,
+				RALINK_ESW_FPA_FORCE_MODE_SHIFT,
+				port, en);
+}
+
+static inline void
+ralink_esw_fpa1_set_force_mode(struct ralink_esw *esw, unsigned int port,
+			       bool enable)
+{
+	u32 bit = (port == 5) ? RALINK_ESW_FPA1_FORCE_EN0
+			      : RALINK_ESW_FPA1_FORCE_EN1;
+
+	ralink_esw_rmw(esw, RALINK_ESW_FPA1, bit, enable ? bit : 0);
+}
+
+
+static inline void
+ralink_esw_fpa_set_link(struct ralink_esw *esw, unsigned int port, bool up)
+{
+	ralink_esw_set_port_bit(esw, RALINK_ESW_FPA,
+				RALINK_ESW_FPA_FORCE_LNK_SHIFT,
+				port, up);
+}
+
+static inline void
+ralink_esw_fpa1_set_link(struct ralink_esw *esw, unsigned int port, bool up)
+{
+	u32 bit = (port == 5) ? RALINK_ESW_FPA1_FORCE_LNK0
+			      : RALINK_ESW_FPA1_FORCE_LNK1;
+
+	ralink_esw_rmw(esw, RALINK_ESW_FPA1, bit, up ? bit : 0);
+}
+
+
+static inline void
+ralink_esw_fpa_set_speed(struct ralink_esw *esw, unsigned int port, int speed)
+{
+	ralink_esw_set_port_bit(esw, RALINK_ESW_FPA,
+				RALINK_ESW_FPA_FORCE_SPD_SHIFT,
+				port, speed == SPEED_100);
+}
+
+static inline void
+ralink_esw_fpa1_set_speed(struct ralink_esw *esw, unsigned int port, int speed)
+{
+	u32 mask  = (port == 5) ? RALINK_ESW_FPA1_FORCE_SPD0
+			       : RALINK_ESW_FPA1_FORCE_SPD1;
+	u32 shift = (port == 5) ? RALINK_ESW_FPA1_FORCE_SPD0_SHIFT
+			       : RALINK_ESW_FPA1_FORCE_SPD1_SHIFT;
+	u32 val;
+
+	switch (speed) {
+	case SPEED_1000:
+		val = 2;
+		break;
+	case SPEED_100:
+		val = 1;
+		break;
+	default:
+		val = 0;
+		break;
+	}
+
+	ralink_esw_rmw(esw, RALINK_ESW_FPA1, mask, (val << shift) & mask);
+}
+
+static inline void
+ralink_esw_fpa_set_duplex(struct ralink_esw *esw, unsigned int port, bool full)
+{
+	ralink_esw_set_port_bit(esw, RALINK_ESW_FPA,
+				RALINK_ESW_FPA_FORCE_DPX_SHIFT,
+				port, full);
+}
+
+static inline void
+ralink_esw_fpa1_set_duplex(struct ralink_esw *esw, unsigned int port,
+			   bool full)
+{
+	u32 bit = (port == 5) ? RALINK_ESW_FPA1_FORCE_DPX0
+			      : RALINK_ESW_FPA1_FORCE_DPX1;
+
+	ralink_esw_rmw(esw, RALINK_ESW_FPA1, bit, full ? bit : 0);
+}
+
+static inline void
+ralink_esw_fpa_set_pause(struct ralink_esw *esw, unsigned int port, bool en)
+{
+	ralink_esw_set_port_bit(esw, RALINK_ESW_FPA,
+				RALINK_ESW_FPA_FORCE_XFC_SHIFT,
+				port, en);
+}
+
+static inline void
+ralink_esw_fpa1_set_pause(struct ralink_esw *esw, unsigned int port,
+			  bool tx_pause, bool rx_pause)
+{
+	u32 mask  = (port == 5) ? RALINK_ESW_FPA1_FORCE_XFC0
+			       : RALINK_ESW_FPA1_FORCE_XFC1;
+	u32 shift = (port == 5) ? RALINK_ESW_FPA1_FORCE_XFC0_SHIFT
+			       : RALINK_ESW_FPA1_FORCE_XFC1_SHIFT;
+	u32 val = (tx_pause ? 0x2 : 0) | (rx_pause ? 0x1 : 0);
+
+	ralink_esw_rmw(esw, RALINK_ESW_FPA1, mask, (val << shift) & mask);
+}
+
+static void ralink_esw_port_set_force_mode(struct ralink_esw *esw, int port,
+					   bool enable)
+{
+	if (port <= 4)
+		ralink_esw_fpa_set_force_mode(esw, port, enable);
+	else
+		ralink_esw_fpa1_set_force_mode(esw, port, enable);
+}
+
+static void ralink_esw_port_set_link(struct ralink_esw *esw, int port, bool up)
+{
+	if (port <= 4)
+		ralink_esw_fpa_set_link(esw, port, up);
+	else
+		ralink_esw_fpa1_set_link(esw, port, up);
+}
+
+static void ralink_esw_port_set_speed(struct ralink_esw *esw, int port, int speed)
+{
+	if (port <= 4)
+		ralink_esw_fpa_set_speed(esw, port, speed);
+	else
+		ralink_esw_fpa1_set_speed(esw, port, speed);
+}
+
+static void ralink_esw_port_set_duplex(struct ralink_esw *esw, int port, bool full)
+{
+	if (port <= 4)
+		ralink_esw_fpa_set_duplex(esw, port, full);
+	else
+		ralink_esw_fpa1_set_duplex(esw, port, full);
+}
+
+static void ralink_esw_port_set_pause(struct ralink_esw *esw, int port,
+				      bool tx_pause, bool rx_pause)
+{
+	if (port <= 4)
+		ralink_esw_fpa_set_pause(esw, port, tx_pause && rx_pause);
+	else
+		ralink_esw_fpa1_set_pause(esw, port, tx_pause, rx_pause);
+}
+
+static void ralink_esw_phylink_get_caps(struct dsa_switch *ds, int port,
+					struct phylink_config *config)
+{
+	switch (port) {
+	case 0 ... 4:
+		config->mac_capabilities = MAC_10 | MAC_100 | MAC_SYM_PAUSE;
+		break;
+	case 6:
+		config->mac_capabilities = MAC_10 | MAC_100 | MAC_1000FD |
+					   MAC_SYM_PAUSE | MAC_ASYM_PAUSE;
+		break;
+	default:
+		config->mac_capabilities = 0;
+		break;
+	}
+}
+
+static void ralink_esw_mac_config(struct phylink_config *config,
+				  unsigned int mode,
+				  const struct phylink_link_state *state)
+{
+	/* Nothing to program until link-up/link-down. */
+}
+
+static void ralink_esw_mac_link_down(struct phylink_config *config,
+				     unsigned int mode,
+				     phy_interface_t interface)
+{
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct ralink_esw *esw = dp->ds->priv;
+
+	ralink_esw_port_set_force_mode(esw, dp->index, true);
+	ralink_esw_port_set_link(esw, dp->index, false);
+}
+
+static void ralink_esw_mac_link_up(struct phylink_config *config,
+				   struct phy_device *phydev,
+				   unsigned int mode,
+				   phy_interface_t interface,
+				   int speed, int duplex,
+				   bool tx_pause, bool rx_pause)
+{
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct ralink_esw *esw = dp->ds->priv;
+
+	ralink_esw_port_set_force_mode(esw, dp->index, true);
+	ralink_esw_port_set_speed(esw, dp->index, speed);
+	ralink_esw_port_set_duplex(esw, dp->index, duplex == DUPLEX_FULL);
+	ralink_esw_port_set_pause(esw, dp->index, tx_pause, rx_pause);
+	ralink_esw_port_set_link(esw, dp->index, true);
+}
+
 static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
-        /* stub for phylink_mac_ops */
+	.mac_config	= ralink_esw_mac_config,
+	.mac_link_down	= ralink_esw_mac_link_down,
+	.mac_link_up	= ralink_esw_mac_link_up,
 };
 
 static const struct dsa_switch_ops ralink_esw_ops = {
-        /* stub for dsa_switch_ops */
+        /* phylink */
+        .phylink_get_caps    = ralink_esw_phylink_get_caps,
 };
 
 static int ralink_esw_probe(struct platform_device *pdev)
