@@ -396,6 +396,71 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .phylink_get_caps    = ralink_esw_phylink_get_caps,
 };
 
+static void ralink_esw_phylink_mac_change(struct ralink_esw *esw, int port,
+					  bool up)
+{
+	struct dsa_port *dp = dsa_to_port(esw->ds, port);
+
+	phylink_mac_change(dp->pl, up);
+}
+
+static irqreturn_t ralink_esw_irq_thread(int irq, void *data)
+{
+	struct ralink_esw *esw = data;
+	u32 stat, link, change;
+	int port;
+
+	stat = ralink_esw_r32(esw, RALINK_ESW_ISR);
+	if (!(stat & RALINK_ESW_PORT_ST_CHG))
+		return IRQ_NONE;
+
+	link = ralink_esw_r32(esw, RALINK_ESW_POA) >>
+	       RALINK_ESW_POA_LINK_SHIFT;
+	change = link ^ esw->link_state;
+
+	for (port = 0; port < RALINK_ESW_NUM_PORTS; port++) {
+		if (change & BIT(port))
+			ralink_esw_phylink_mac_change(esw, port,
+						      !!(link & BIT(port)));
+	}
+
+	esw->link_state = link;
+
+	/* Ack interrupt after sampling link state */
+	ralink_esw_w32(esw, RALINK_ESW_ISR, stat);
+
+	return IRQ_HANDLED;
+}
+
+static int ralink_esw_irq_init(struct ralink_esw *esw)
+{
+	int irq, ret;
+
+        irq = platform_get_irq_optional(to_platform_device(esw->dev), 0);
+        if (irq == -ENXIO)
+	        return 0;
+        if (irq < 0)
+	        return irq;
+
+	esw->link_state = ralink_esw_r32(esw, RALINK_ESW_POA) >>
+			  RALINK_ESW_POA_LINK_SHIFT;
+
+	ret = devm_request_threaded_irq(esw->dev, irq, NULL,
+					ralink_esw_irq_thread,
+					IRQF_ONESHOT,
+					dev_name(esw->dev), esw);
+	if (ret) {
+		dev_warn(esw->dev,
+			 "failed to request link IRQ, falling back to polling\n");
+		return 0;
+	}
+
+	/* Unmask switch link-change interrupt only */
+	ralink_esw_w32(esw, RALINK_ESW_IMR, RALINK_ESW_PORT_ST_CHG);
+
+	return 0;
+}
+
 static int ralink_esw_probe(struct platform_device *pdev)
 {
     struct device *dev = &pdev->dev;
@@ -466,6 +531,10 @@ static int ralink_esw_probe(struct platform_device *pdev)
     if (ret)
         return dev_err_probe(dev, ret,
                      "failed to register DSA switch\n");
+
+    ret = ralink_esw_irq_init(esw);
+    if (ret)
+        dev_warn(dev, "IRQ init failed: %d\n", ret);
 
     return 0;
 }
