@@ -2,8 +2,13 @@
 #ifndef _RALINK_ESW_DSA_H_
 #define _RALINK_ESW_DSA_H_
 
+#include <linux/if_vlan.h>
+
 #define RALINK_ESW_MDIO_TIMEOUT_US         1000
 #define RALINK_ESW_NUM_PORTS               7
+#define RALINK_ESW_MAX_FRAME_LEN	1522
+#define RALINK_ESW_MAX_MTU \
+	(RALINK_ESW_MAX_FRAME_LEN - ETH_HLEN - VLAN_HLEN)
 
 #define RALINK_ESW_ISR                     0x00
 #define RALINK_ESW_IMR                     0x04

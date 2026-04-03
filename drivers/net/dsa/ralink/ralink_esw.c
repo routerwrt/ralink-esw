@@ -391,6 +391,11 @@ static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
 	.mac_link_up	= ralink_esw_mac_link_up,
 };
 
+static int ralink_esw_port_max_mtu(struct dsa_switch *ds, int port)
+{
+	return RALINK_ESW_MAX_MTU;
+}
+
 static int ralink_esw_port_enable(struct dsa_switch *ds, int port,
 				  struct phy_device *phy)
 {
@@ -421,6 +426,7 @@ static void ralink_esw_port_disable(struct dsa_switch *ds, int port)
 static const struct dsa_switch_ops ralink_esw_ops = {
         .port_enable         = ralink_esw_port_enable,
         .port_disable        = ralink_esw_port_disable,
+        .port_max_mtu	     = ralink_esw_port_max_mtu,
 
         /* phylink */
         .phylink_get_caps    = ralink_esw_phylink_get_caps,
