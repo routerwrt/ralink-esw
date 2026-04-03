@@ -713,6 +713,51 @@ static void ralink_esw_port_disable(struct dsa_switch *ds, int port)
 	ralink_esw_rmw(esw, RALINK_ESW_POC0, mask, mask);
 }
 
+static int ralink_esw_port_pre_bridge_flags(struct dsa_switch *ds, int port,
+					    struct switchdev_brport_flags flags,
+					    struct netlink_ext_ack *extack)
+{
+	if (flags.mask & ~BR_LEARNING) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only BR_LEARNING flag is supported");
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
+static void ralink_esw_port_set_learning(struct ralink_esw *esw,
+					 int port, bool enable)
+{
+	u32 val;
+
+	val = ralink_esw_r32(esw, RALINK_ESW_POC2);
+
+	if (enable)
+		val &= ~BIT(RALINK_ESW_POC2_DIS_LRNING_SHIFT + port);
+	else
+		val |= BIT(RALINK_ESW_POC2_DIS_LRNING_SHIFT + port);
+
+	ralink_esw_w32(esw, RALINK_ESW_POC2, val);
+}
+
+static int ralink_esw_port_bridge_flags(struct dsa_switch *ds, int port,
+					struct switchdev_brport_flags flags,
+					struct netlink_ext_ack *extack)
+{
+	struct ralink_esw *esw = ds->priv;
+
+	if (flags.mask & BR_LEARNING) {
+		bool learning = flags.val & BR_LEARNING;
+
+		esw->ports[port].learning = learning;
+
+		ralink_esw_port_set_learning(esw, port, learning);
+	}
+
+	return 0;
+}
+
 static const struct dsa_switch_ops ralink_esw_ops = {
         .port_enable         = ralink_esw_port_enable,
         .port_disable        = ralink_esw_port_disable,
@@ -721,6 +766,11 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .port_vlan_filtering	= ralink_esw_port_vlan_filtering,
         .port_vlan_add		= ralink_esw_port_vlan_add,
         .port_vlan_del		= ralink_esw_port_vlan_del,
+
+        .port_bridge_join	= dsa_tag_8021q_bridge_join,
+        .port_bridge_leave	= dsa_tag_8021q_bridge_leave,
+        .port_pre_bridge_flags	= ralink_esw_port_pre_bridge_flags,
+        .port_bridge_flags	= ralink_esw_port_bridge_flags,
 
         .tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
         .tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
