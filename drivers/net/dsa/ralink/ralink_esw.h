@@ -10,6 +10,9 @@
 #define RALINK_ESW_MAX_MTU \
 	(RALINK_ESW_MAX_FRAME_LEN - ETH_HLEN - VLAN_HLEN)
 
+#define RALINK_ESW_NUM_VLANS		16
+#define RALINK_ESW_VID_NONE		0
+
 #define RALINK_ESW_ISR                     0x00
 #define RALINK_ESW_IMR                     0x04
 #define   RALINK_ESW_PORT_ST_CHG           BIT(26)
@@ -55,11 +58,38 @@
 #define RALINK_ESW_POC0			   0x90
 #define RALINK_ESW_POC0_DIS_PORT_SHIFT	   23
 
-/* ---- Packed table registers (2 entries per 32-bit register) ---- */
-#define RALINK_ESW_PVIDC_BASE             0x40  /* port PVID table */
-#define RALINK_ESW_VLANI_BASE             0x50  /* VLAN ID (VID) table */
-#define RALINK_ESW_VMSC_BASE              0x70  /* VLAN member */
-#define RALINK_ESW_VUB_BASE               0x100 /* VLAN untag */
+#define RALINK_ESW_PFC1                   0x14
+#define   RALINK_ESW_PFC1_EN_VLAN_SHIFT	  16
+
+#define RALINK_ESW_PFC1_EN_VLAN_BIT(port) \
+	BIT(RALINK_ESW_PFC1_EN_VLAN_SHIFT + (port))
+
+#define RALINK_ESW_SGC2                   0xe4
+#define   RALINK_ESW_SGC2_P6_RXFC_QUE_EN  BIT(31)
+#define   RALINK_ESW_SGC2_P6_TXFC_WL_EN   BIT(30)
+#define   RALINK_ESW_SGC2_LAN_PMAP        GENMASK(29, 24) /* port0..5 */
+#define   RALINK_ESW_SGC2_SPECIAL_TAG     BIT(23)
+#define   RALINK_ESW_SGC2_PORT6_ID        BIT(22)         /* TX to CPU port 6 */
+#define   RALINK_ESW_SGC2_TX_CPU_TPID_BIT_MAP GENMASK(22, 16)
+#define   RALINK_ESW_SGC2_P6_TXFC_QUE_EN  BIT(12)
+#define   RALINK_ESW_SGC2_CPU_TPID_EN     BIT(10)
+#define   RALINK_ESW_SGC2_DOUBLE_TAG_EN   GENMASK(6, 0)   /* per-port bitmap */
+
+#define RALINK_ESW_SGC2_DOUBLE_TAG_EN_BIT(port) \
+	BIT(port)
+
+/* ---- Packed VLAN tables ---- */
+#define RALINK_ESW_PVIDC_BASE		0x0040
+#define RALINK_ESW_VLANI_BASE		0x0050
+#define RALINK_ESW_VMSC_BASE		0x0070
+#define RALINK_ESW_VUB_BASE		0x0100
+
+#define RALINK_ESW_TBL_PER_REG_2	2
+#define RALINK_ESW_TBL_PER_REG_4	4
+
+#define RALINK_ESW_TBL_WID_VID		16 /* 12 bits used */
+#define RALINK_ESW_TBL_WID_MSC		8  /* port bitmap */
+#define RALINK_ESW_TBL_WID_UTG		8  /* untag bitmap */
 
 /* Packed lane helper (idx selects lane 0/1 within a 32-bit register) */
 static inline u32 ralink_esw_tbl_reg(u32 base, u16 idx, u16 per_reg)
@@ -73,12 +103,6 @@ static inline u32 ralink_esw_tbl_mask(u16 idx, u16 per_reg, u16 width)
 
 	return GENMASK(width - 1, 0) << shift;
 }
-
-/* Common packed widths */
-#define RALINK_ESW_TBL_PER_REG_2          2
-#define RALINK_ESW_TBL_WID_VID            16 /* 12-bit used, 4 reserved */
-#define RALINK_ESW_TBL_WID_MSC            16 /* 8-bit used, 8 reserved */
-#define RALINK_ESW_TBL_WID_UTG            16 /* 7-bit used, 9 reserved */
 
 /* PVID: per port */
 static inline u32 ralink_esw_pvidc_reg(unsigned int port)
@@ -118,6 +142,17 @@ static inline u32 ralink_esw_vub_mask(unsigned int slot)
 	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2, RALINK_ESW_TBL_WID_UTG);
 }
 
+struct ralink_esw_port {
+	bool vlan_filtering;
+	bool learning;
+
+	u16 pvid_tag_8021q;
+	bool pvid_tag_8021q_configured;
+
+	u16 pvid_vlan_filtering;
+	bool pvid_vlan_filtering_configured;
+};
+
 struct ralink_esw {
 	struct device *dev;
 	void __iomem *base;
@@ -133,6 +168,14 @@ struct ralink_esw {
         u32 link_state;
 
 	struct dsa_switch *ds;
+
+        DECLARE_BITMAP(vlan_slot, RALINK_ESW_NUM_VLANS);
+	u16 vlan_vid[RALINK_ESW_NUM_VLANS];
+	u8 vlan_member[RALINK_ESW_NUM_VLANS];
+	u8 vlan_untag[RALINK_ESW_NUM_VLANS];
+
+	struct ralink_esw_port ports[RALINK_ESW_NUM_PORTS];
+	int cpu_port;
 };
 
 #endif /* _RALINK_ESW_DSA_H_ */

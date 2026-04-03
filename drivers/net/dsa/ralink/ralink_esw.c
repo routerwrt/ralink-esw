@@ -7,6 +7,8 @@
  */
 
 #include <linux/clk.h>
+#include <linux/dsa/8021q.h>
+#include <linux/if_bridge.h>
 #include <linux/of_mdio.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
@@ -391,6 +393,294 @@ static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
 	.mac_link_up	= ralink_esw_mac_link_up,
 };
 
+static inline void ralink_esw_set_field(struct ralink_esw *esw, u32 base,
+					u16 idx, u16 width, u16 per_reg,
+					u32 val)
+{
+	u32 reg = ralink_esw_tbl_reg(base, idx, per_reg);
+	u16 shift = (idx % per_reg) * width;
+	u32 mask = GENMASK(width - 1, 0) << shift;
+	u32 set = (val << shift) & mask;
+
+	ralink_esw_rmw(esw, reg, mask, set);
+}
+
+static inline u32 ralink_esw_get_field(struct ralink_esw *esw, u32 base,
+				       u16 idx, u16 width, u16 per_reg)
+{
+	u32 reg = ralink_esw_tbl_reg(base, idx, per_reg);
+	u16 shift = (idx % per_reg) * width;
+	u32 mask = GENMASK(width - 1, 0) << shift;
+
+	return (ralink_esw_r32(esw, reg) & mask) >> shift;
+}
+
+/* semantic table helpers */
+static inline void ralink_esw_set_pvid(struct ralink_esw *esw,
+				       unsigned int port, u16 vid)
+{
+	ralink_esw_set_field(esw, RALINK_ESW_PVIDC_BASE, port,
+			     RALINK_ESW_TBL_WID_VID,
+			     RALINK_ESW_TBL_PER_REG_2, vid);
+}
+
+static inline void ralink_esw_set_vlan_vid(struct ralink_esw *esw,
+					   unsigned int slot, u16 vid)
+{
+	ralink_esw_set_field(esw, RALINK_ESW_VLANI_BASE, slot,
+			     RALINK_ESW_TBL_WID_VID,
+			     RALINK_ESW_TBL_PER_REG_2, vid);
+}
+
+static inline void ralink_esw_set_vlan_members(struct ralink_esw *esw,
+					       unsigned int slot, u8 members)
+{
+	ralink_esw_set_field(esw, RALINK_ESW_VMSC_BASE, slot,
+			     RALINK_ESW_TBL_WID_MSC,
+			     RALINK_ESW_TBL_PER_REG_4, members);
+}
+
+static inline void ralink_esw_set_vlan_untag(struct ralink_esw *esw,
+					     unsigned int slot, u8 untag)
+{
+	ralink_esw_set_field(esw, RALINK_ESW_VUB_BASE, slot,
+			     RALINK_ESW_TBL_WID_UTG,
+			     RALINK_ESW_TBL_PER_REG_4, untag);
+}
+
+static void ralink_esw_vlan_write(struct ralink_esw *esw, unsigned int slot)
+{
+	ralink_esw_set_vlan_vid(esw, slot, esw->vlan_vid[slot]);
+	ralink_esw_set_vlan_members(esw, slot, esw->vlan_member[slot]);
+	ralink_esw_set_vlan_untag(esw, slot, esw->vlan_untag[slot]);
+}
+
+static int ralink_esw_find_vlan_slot(struct ralink_esw *esw, u16 vid)
+{
+	int i;
+
+	for_each_set_bit(i, esw->vlan_slot, RALINK_ESW_NUM_VLANS) {
+		if (esw->vlan_vid[i] == vid)
+			return i;
+	}
+
+	return -ENOENT;
+}
+
+static int ralink_esw_alloc_vlan_slot(struct ralink_esw *esw, u16 vid)
+{
+	int i;
+
+	i = ralink_esw_find_vlan_slot(esw, vid);
+	if (i >= 0)
+		return i;
+
+	i = find_first_zero_bit(esw->vlan_slot, RALINK_ESW_NUM_VLANS);
+	if (i >= RALINK_ESW_NUM_VLANS)
+		return -ENOSPC;
+
+	set_bit(i, esw->vlan_slot);
+
+	esw->vlan_vid[i] = vid;
+	esw->vlan_member[i] = 0;
+	esw->vlan_untag[i] = 0;
+
+	ralink_esw_vlan_write(esw, i);
+
+	return i;
+}
+
+static void ralink_esw_free_vlan_slot(struct ralink_esw *esw, int i)
+{
+	clear_bit(i, esw->vlan_slot);
+
+	esw->vlan_vid[i] = RALINK_ESW_VID_NONE;
+	esw->vlan_member[i] = 0;
+	esw->vlan_untag[i] = 0;
+
+	ralink_esw_vlan_write(esw, i);
+}
+
+static int ralink_esw_port_commit_pvid(struct ralink_esw *esw, int port)
+{
+	struct ralink_esw_port *p = &esw->ports[port];
+	u16 vid = 0;
+	bool valid = false;
+
+	vid = p->pvid_tag_8021q;
+	valid = p->pvid_tag_8021q_configured;
+
+	if (p->vlan_filtering) {
+		vid = p->pvid_vlan_filtering;
+		valid = p->pvid_vlan_filtering_configured;
+	}
+
+	if (!valid)
+		vid = 0;
+
+	ralink_esw_set_pvid(esw, port, vid);
+
+	return 0;
+}
+
+static int ralink_esw_port_vlan_filtering(struct dsa_switch *ds, int port,
+					  bool vlan_filtering,
+					  struct netlink_ext_ack *extack)
+{
+	struct ralink_esw *esw = ds->priv;
+	u32 mask, set;
+
+	if (dsa_is_cpu_port(ds, port))
+		vlan_filtering = true;
+
+	mask = RALINK_ESW_PFC1_EN_VLAN_BIT(port);
+	set = vlan_filtering ? mask : 0;
+	ralink_esw_rmw(esw, RALINK_ESW_PFC1, mask, set);
+
+	mask = RALINK_ESW_SGC2_DOUBLE_TAG_EN_BIT(port);
+	set = vlan_filtering ? 0 : mask;
+	ralink_esw_rmw(esw, RALINK_ESW_SGC2, mask, set);
+
+	esw->ports[port].vlan_filtering = vlan_filtering;
+
+	return ralink_esw_port_commit_pvid(esw, port);
+}
+
+static int ralink_esw_port_vlan_add(struct dsa_switch *ds, int port,
+				    const struct switchdev_obj_port_vlan *vlan,
+				    struct netlink_ext_ack *extack)
+{
+	struct ralink_esw *esw = ds->priv;
+	bool untagged = vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED;
+	bool pvid = vlan->flags & BRIDGE_VLAN_INFO_PVID;
+	u16 vid = vlan->vid;
+	int slot, err;
+
+	if (vid_is_dsa_8021q(vid)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Range 3072-4095 reserved for dsa_8021q operation");
+		return -EBUSY;
+	}
+
+	slot = ralink_esw_alloc_vlan_slot(esw, vid);
+	if (slot < 0)
+		return slot;
+
+	esw->vlan_member[slot] |= BIT(port);
+	/* CPU port must always remain tagged */
+	untagged = untagged && port != esw->cpu_port;
+
+	if (untagged)
+		esw->vlan_untag[slot] |= BIT(port);
+	else
+		esw->vlan_untag[slot] &= ~BIT(port);
+
+	ralink_esw_vlan_write(esw, slot);
+
+	if (pvid) {
+		esw->ports[port].pvid_vlan_filtering = vid;
+		esw->ports[port].pvid_vlan_filtering_configured = true;
+
+		err = ralink_esw_port_commit_pvid(esw, port);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
+static int ralink_esw_port_vlan_del(struct dsa_switch *ds, int port,
+				    const struct switchdev_obj_port_vlan *vlan)
+{
+	struct ralink_esw *esw = ds->priv;
+ 	u16 vid = vlan->vid;
+	int slot;
+
+ 	slot = ralink_esw_find_vlan_slot(esw, vid);
+	if (slot < 0)
+		return 0;
+
+	esw->vlan_member[slot] &= ~BIT(port);
+	esw->vlan_untag[slot] &= ~BIT(port);
+
+	ralink_esw_vlan_write(esw, slot);
+
+	if (!esw->vlan_member[slot])
+		ralink_esw_free_vlan_slot(esw, slot);
+
+	return 0;
+}
+
+static int ralink_esw_tag_8021q_vlan_add(struct dsa_switch *ds, int port,
+					 u16 vid, u16 flags)
+{
+	struct ralink_esw *esw = ds->priv;
+	bool untagged = flags & BRIDGE_VLAN_INFO_UNTAGGED;
+	bool pvid = flags & BRIDGE_VLAN_INFO_PVID;
+	int slot, err;
+	
+	slot = ralink_esw_alloc_vlan_slot(esw, vid);
+	if (slot < 0)
+		return slot;
+
+	esw->vlan_member[slot] |= BIT(port) | BIT(esw->cpu_port);
+
+	if (untagged)
+		esw->vlan_untag[slot] |= BIT(port);
+	else
+		esw->vlan_untag[slot] &= ~BIT(port);
+
+	/* CPU port must always remain tagged */
+	esw->vlan_untag[slot] &= ~BIT(esw->cpu_port);
+
+	ralink_esw_vlan_write(esw, slot);
+
+	if (pvid) {
+		esw->ports[port].pvid_tag_8021q = vid;
+		esw->ports[port].pvid_tag_8021q_configured = true;
+
+		err = ralink_esw_port_commit_pvid(esw, port);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
+static int ralink_esw_tag_8021q_vlan_del(struct dsa_switch *ds, int port, u16 vid)
+{
+	struct ralink_esw *esw = ds->priv;
+	const struct dsa_port *dp = dsa_to_port(ds, port);
+	int slot, err;
+
+	if (vid == dsa_tag_8021q_standalone_vid(dp))
+		return 0;
+
+	slot = ralink_esw_find_vlan_slot(esw, vid);
+	if (slot < 0)
+		return 0;
+
+	esw->vlan_member[slot] &= ~BIT(port);
+	esw->vlan_untag[slot] &= ~BIT(port);
+
+	if (!(esw->vlan_member[slot] & ~BIT(esw->cpu_port)))
+		ralink_esw_free_vlan_slot(esw, slot);
+	else
+		ralink_esw_vlan_write(esw, slot);
+
+	if (esw->ports[port].pvid_tag_8021q_configured &&
+	    esw->ports[port].pvid_tag_8021q == vid) {
+		esw->ports[port].pvid_tag_8021q_configured = false;
+		esw->ports[port].pvid_tag_8021q = 0;
+
+		err = ralink_esw_port_commit_pvid(esw, port);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
 static int ralink_esw_port_max_mtu(struct dsa_switch *ds, int port)
 {
 	return RALINK_ESW_MAX_MTU;
@@ -427,6 +717,13 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .port_enable         = ralink_esw_port_enable,
         .port_disable        = ralink_esw_port_disable,
         .port_max_mtu	     = ralink_esw_port_max_mtu,
+
+        .port_vlan_filtering	= ralink_esw_port_vlan_filtering,
+        .port_vlan_add		= ralink_esw_port_vlan_add,
+        .port_vlan_del		= ralink_esw_port_vlan_del,
+
+        .tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
+        .tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
 
         /* phylink */
         .phylink_get_caps    = ralink_esw_phylink_get_caps,
