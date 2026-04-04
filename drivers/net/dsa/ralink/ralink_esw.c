@@ -784,7 +784,193 @@ static int ralink_esw_port_bridge_flags(struct dsa_switch *ds, int port,
 	return 0;
 }
 
+static int ralink_esw_cpu_port_detect(struct ralink_esw *esw)
+{
+	struct dsa_switch *ds = esw->ds;
+	int port, cpu_port = -1;
+
+	for (port = 0; port < ds->num_ports; port++) {
+		if (!dsa_is_cpu_port(ds, port))
+			continue;
+
+		if (cpu_port >= 0)
+			return -EINVAL; /* multiple CPU ports */
+
+		cpu_port = port;
+	}
+
+	if (cpu_port < 0)
+		return -EINVAL;
+
+	esw->cpu_port = cpu_port;
+
+	switch (cpu_port) {
+	case 6: return 0;
+	case 0: return 1;
+	case 4: return 2;
+	case 5: return 3;
+	default:
+		return -EINVAL; /* unsupported encoding */
+	}
+}
+
+static int ralink_esw_setup(struct dsa_switch *ds)
+{
+	struct ralink_esw *esw = ds->priv;
+	u32 socpc;
+	int cpu_enc, i, ret;
+
+	cpu_enc = ralink_esw_cpu_port_detect(esw);
+	if (cpu_enc < 0)
+		return dev_err_probe(esw->dev, cpu_enc,
+			     "invalid CPU port\n");
+	/*
+	 * - packets sent from the CPU do not require software CRC padding
+	 *
+	 * Default host flooding policy:
+	 * - do not punt unknown unicast to CPU
+	 * - do not punt multicast to CPU
+	 * - do not punt broadcast to CPU
+	 *
+	 * Per-port unknown unicast/multicast host flooding may be enabled
+	 * later through port_set_host_flood(). Broadcast-to-CPU remains a
+	 * fixed global policy.
+	 */
+	socpc = RALINK_ESW_SOCPC_CRC_PADDING |
+		FIELD_PREP(RALINK_ESW_SOCPC_CPU_SELECTION, cpu_enc) |
+		FIELD_PREP(RALINK_ESW_SOCPC_DISBC2CPU, 0x7f) |
+		FIELD_PREP(RALINK_ESW_SOCPC_DISMC2CPU, 0x7f) |
+		FIELD_PREP(RALINK_ESW_SOCPC_DISUN2CPU, 0x7f);
+
+	ralink_esw_w32(esw, RALINK_ESW_SOCPC, socpc);
+
+	/* Enable special tag on the CPU port (selected via DSA/DTS). */
+	ralink_esw_rmw(esw, RALINK_ESW_SGC2,
+		RALINK_ESW_SGC2_LAN_PMAP |
+		RALINK_ESW_SGC2_CPU_TPID_EN |
+		RALINK_ESW_SGC2_TX_CPU_TPID_BIT_MAP,
+		RALINK_ESW_SGC2_CPU_TPID_EN |
+		FIELD_PREP(RALINK_ESW_SGC2_TX_CPU_TPID_BIT_MAP,
+			    BIT(esw->cpu_port)));
+
+	/*
+	 * Priority/flow classification baseline:
+	 * - disable ToS/DSCP classification
+	 * - disable VLAN-based classification
+	 * - disable IGMP snooping by default
+	 * - do not program per-port default priority yet
+	 */
+	ralink_esw_rmw(esw, RALINK_ESW_PFC1,
+	       RALINK_ESW_PFC1_CPU_USE_Q1_EN |
+	       RALINK_ESW_PFC1_EN_TOS |
+	       RALINK_ESW_PFC1_EN_VLAN |
+	       RALINK_ESW_PFC1_PRIORITY_OPTION |
+	       RALINK_ESW_PFC1_IGMP_SNOOP,
+	       0);
+
+	/*
+	 * Switch global control:
+	 * - Unknown IP multicast: flood (normal switching)
+	 * - Unknown reserved multicast (e.g. BPDUs): forward to CPU
+	 * - Disable broadcast storm protection
+	 * - Enable address aging
+	 * - Set max packet length to support VLAN/DSA frames
+	 */
+	ralink_esw_rmw(esw, RALINK_ESW_SGC,
+	       RALINK_ESW_SGC_BKOFF_ALG |
+	       RALINK_ESW_SGC_LEN_ERR_CHK |
+	       RALINK_ESW_SGC_IP_MULT_RULE |
+	       RALINK_ESW_SGC_RMC_RULE |
+	       RALINK_ESW_SGC_DIS_PKT_TX_ABORT |
+	       RALINK_ESW_SGC_PKT_MAX_LEN |
+	       RALINK_ESW_SGC_BC_STORM_PROT |
+	       RALINK_ESW_SGC_AGING_INTERVAL,
+	       RALINK_ESW_SGC_BKOFF_ALG |
+	       RALINK_ESW_SGC_LEN_ERR_CHK |
+	       FIELD_PREP(RALINK_ESW_SGC_IP_MULT_RULE, 0) |
+	       FIELD_PREP(RALINK_ESW_SGC_RMC_RULE, 1) |
+	       FIELD_PREP(RALINK_ESW_SGC_DIS_PKT_TX_ABORT, 0) |
+	       FIELD_PREP(RALINK_ESW_SGC_PKT_MAX_LEN, 1) |
+	       FIELD_PREP(RALINK_ESW_SGC_BC_STORM_PROT, 0) |
+	       FIELD_PREP(RALINK_ESW_SGC_AGING_INTERVAL, 1));
+
+       /*
+	 * Port control 1 baseline:
+	 * - do not punt IP multicast to CPU (handled in hardware)
+	 * - no ports in blocking state (forwarding allowed by default)
+	 * - enable MAC learning on all ports
+	 * - disable secure port mode
+	 *
+	 * STP state will override blocking and learning per port.
+	 */
+	ralink_esw_rmw(esw, RALINK_ESW_POC1,
+	       RALINK_ESW_POC1_DIS_IPMC2CPU |
+	       RALINK_ESW_POC1_BLOCKING |
+	       RALINK_ESW_POC1_DIS_LRNING |
+	       RALINK_ESW_POC1_SA_SECURE_PORT,
+	       FIELD_PREP(RALINK_ESW_POC1_DIS_IPMC2CPU, 0x7f) |
+	       FIELD_PREP(RALINK_ESW_POC1_BLOCKING, 0) |
+	       FIELD_PREP(RALINK_ESW_POC1_DIS_LRNING, 0) |
+	       FIELD_PREP(RALINK_ESW_POC1_SA_SECURE_PORT, 0));
+
+	/* Port control 2 baseline:
+	 * - use per-VLAN untag control
+	 * - enable aging on all ports
+	 * - do not force per-port untagging
+	 * - flood unknown IPv6 multicast
+	 * - do not punt MLD to CPU by default
+	 */
+	ralink_esw_rmw(esw, RALINK_ESW_POC2,
+	       RALINK_ESW_POC2_DIS_UC_PAUSE |
+	       RALINK_ESW_POC2_PER_VLAN_UNTAG_EN |
+	       RALINK_ESW_POC2_ENAGING |
+	       RALINK_ESW_POC2_UNTAG_EN |
+	       RALINK_ESW_POC2_MLD2CPU_EN |
+	       RALINK_ESW_POC2_IPV6_MULT_RULE,
+	       FIELD_PREP(RALINK_ESW_POC2_DIS_UC_PAUSE, 0) |
+	       RALINK_ESW_POC2_PER_VLAN_UNTAG_EN |
+	       FIELD_PREP(RALINK_ESW_POC2_ENAGING, 0x7f) |
+	       FIELD_PREP(RALINK_ESW_POC2_UNTAG_EN, 0) |
+	       FIELD_PREP(RALINK_ESW_POC2_MLD2CPU_EN, 0) |
+	       FIELD_PREP(RALINK_ESW_POC2_IPV6_MULT_RULE, 0));
+
+        bitmap_zero(esw->vlan_slot, RALINK_ESW_NUM_VLANS);
+
+	for (i = 0; i < RALINK_ESW_NUM_VLANS; i++) {
+		esw->vlan_vid[i] = RALINK_ESW_VID_NONE;
+		esw->vlan_member[i] = 0;
+		esw->vlan_untag[i] = 0;
+		ralink_esw_set_vlan_vid(esw, i, 0);
+		ralink_esw_set_vlan_members(esw, i, 0);
+		ralink_esw_set_vlan_untag(esw, i, 0);
+	}
+
+	for (i = 0; i < ds->num_ports; i++) {
+		esw->ports[i].vlan_filtering = false;
+		esw->ports[i].learning = true;
+		esw->ports[i].pvid_tag_8021q = 0;
+		esw->ports[i].pvid_tag_8021q_configured = false;
+		esw->ports[i].pvid_vlan_filtering = 0;
+		esw->ports[i].pvid_vlan_filtering_configured = false;
+	}
+
+	rtnl_lock();
+	ret = dsa_tag_8021q_register(ds, htons(ETH_P_8021Q));
+	rtnl_unlock();
+
+	return ret;
+}
+
+static void ralink_esw_teardown(struct dsa_switch *ds)
+{
+	rtnl_lock();
+	dsa_tag_8021q_unregister(ds);
+	rtnl_unlock();
+}
+
 static const struct dsa_switch_ops ralink_esw_ops = {
+	.setup		     = ralink_esw_setup,
+	.teardown	     = ralink_esw_teardown,
         .port_enable         = ralink_esw_port_enable,
         .port_disable        = ralink_esw_port_disable,
         .port_max_mtu	     = ralink_esw_port_max_mtu,
