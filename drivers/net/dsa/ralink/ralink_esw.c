@@ -1322,7 +1322,16 @@ static void ralink_esw_teardown(struct dsa_switch *ds)
 	rtnl_unlock();
 }
 
+static enum dsa_tag_protocol ralink_esw_get_tag_protocol(struct dsa_switch *ds,
+						 int port,
+						 enum dsa_tag_protocol mp)
+{
+    return DSA_TAG_PROTO_RALINK;
+}
+
 static const struct dsa_switch_ops ralink_esw_ops = {
+	.get_tag_protocol    = ralink_esw_get_tag_protocol,
+
 	.setup		     = ralink_esw_setup,
 	.teardown	     = ralink_esw_teardown,
         .port_enable         = ralink_esw_port_enable,
