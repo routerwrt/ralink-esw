@@ -3,6 +3,7 @@
 #define _RALINK_ESW_DSA_H_
 
 #include <linux/if_vlan.h>
+#include <linux/regmap.h>
 
 #define RALINK_ESW_MDIO_TIMEOUT_US         1000
 #define RALINK_ESW_NUM_PORTS               7
@@ -12,6 +13,15 @@
 
 #define RALINK_ESW_NUM_VLANS		   16
 #define RALINK_ESW_VID_NONE		   0
+
+#define SDM_RRING			   0x004
+
+#define   SDM_PRIO_RING_MASK		   GENMASK(7, 0)
+#define   SDM_PRIO_RING_BIT(prio) 	   BIT(prio)
+
+#define   SDM_PORT_RING_MASK		   GENMASK(12, 8) /* port0..4 */
+#define   SDM_PORT_RING_SHIFT		   8
+#define   SDM_PORT_RING_BIT(port)	   BIT(SDM_PORT_RING_SHIFT + (port))
 
 #define RALINK_ESW_ISR                     0x00
 #define RALINK_ESW_IMR                     0x04
@@ -287,6 +297,7 @@ struct ralink_esw {
 	struct clk *clk;
 	struct reset_control *rst_esw;
 	struct reset_control *rst_ephy;
+	struct regmap *sdm;
 
          /* MDIO */
         struct mutex mdio_lock;

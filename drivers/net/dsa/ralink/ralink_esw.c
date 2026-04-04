@@ -9,8 +9,10 @@
 #include <linux/clk.h>
 #include <linux/dsa/8021q.h>
 #include <linux/if_bridge.h>
+#include <linux/mfd/syscon.h>
 #include <linux/of_mdio.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/reset.h>
 #include <net/dsa.h>
 
@@ -1046,6 +1048,69 @@ static void ralink_esw_port_disable(struct dsa_switch *ds, int port)
 	ralink_esw_rmw(esw, RALINK_ESW_POC0, mask, mask);
 }
 
+static void ralink_esw_sdm_set_prio_baseline(struct ralink_esw *esw)
+{
+	if (!esw->sdm)
+		return;
+
+	/* priorities 0..3 -> RX1, 4..7 -> RX0 */
+	regmap_update_bits(esw->sdm, SDM_RRING,
+			   SDM_PRIO_RING_MASK,
+			   GENMASK(3, 0));
+}
+
+static void ralink_esw_sdm_set_port_ring(struct ralink_esw *esw,
+					 int port, bool rx1)
+{
+	if (!esw->sdm || port > 4)
+		return;
+
+	regmap_update_bits(esw->sdm, SDM_RRING,
+			   SDM_PORT_RING_BIT(port),
+			   rx1 ? SDM_PORT_RING_BIT(port) : 0);
+}
+
+static void ralink_esw_port_set_default_prio(struct ralink_esw *esw,
+					     int port, u8 prio)
+{
+	u32 mask = RALINK_ESW_PFC1_PORT_PRI_MASK(port);
+	u32 set = RALINK_ESW_PFC1_PORT_PRI_VAL(port, prio & 0x3);
+
+	ralink_esw_rmw(esw, RALINK_ESW_PFC1, mask, set);
+}
+
+static int ralink_esw_port_bridge_join(struct dsa_switch *ds, int port,
+				       struct dsa_bridge bridge,
+				       bool *tx_fwd_offload,
+				       struct netlink_ext_ack *extack)
+{
+	struct ralink_esw *esw = ds->priv;
+	int ret;
+
+	ret = dsa_tag_8021q_bridge_join(ds, port, bridge, tx_fwd_offload,
+					extack);
+	if (ret)
+		return ret;
+
+	/* Bridged traffic uses normal/default priority. */
+	ralink_esw_port_set_default_prio(esw, port, 0);
+        ralink_esw_sdm_set_port_ring(esw, port, false);
+
+	return 0;
+}
+
+static void ralink_esw_port_bridge_leave(struct dsa_switch *ds, int port,
+					 struct dsa_bridge bridge)
+{
+	struct ralink_esw *esw = ds->priv;
+
+	dsa_tag_8021q_bridge_leave(ds, port, bridge);
+
+	/* Standalone traffic uses the reserved steering class. */
+	ralink_esw_port_set_default_prio(esw, port, 2);
+        ralink_esw_sdm_set_port_ring(esw, port, true);
+}
+
 static int ralink_esw_port_pre_bridge_flags(struct dsa_switch *ds, int port,
 					    struct switchdev_brport_flags flags,
 					    struct netlink_ext_ack *extack)
@@ -1306,7 +1371,11 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 		esw->ports[i].pvid_tag_8021q_configured = false;
 		esw->ports[i].pvid_vlan_filtering = 0;
 		esw->ports[i].pvid_vlan_filtering_configured = false;
+		/* Standalone baseline: use reserved steering class */
+		ralink_esw_port_set_default_prio(esw, i, 2);
 	}
+
+	ralink_esw_sdm_set_prio_baseline(esw);
 
 	rtnl_lock();
 	ret = dsa_tag_8021q_register(ds, htons(ETH_P_8021Q));
@@ -1342,9 +1411,9 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .port_vlan_add		= ralink_esw_port_vlan_add,
         .port_vlan_del		= ralink_esw_port_vlan_del,
 
-        .port_bridge_join	= dsa_tag_8021q_bridge_join,
-        .port_bridge_leave	= dsa_tag_8021q_bridge_leave,
-        .port_pre_bridge_flags	= ralink_esw_port_pre_bridge_flags,
+	.port_bridge_join	= ralink_esw_port_bridge_join,
+	.port_bridge_leave	= ralink_esw_port_bridge_leave,
+	.port_pre_bridge_flags	= ralink_esw_port_pre_bridge_flags,
         .port_bridge_flags	= ralink_esw_port_bridge_flags,
         .port_stp_state_set     = ralink_esw_port_stp_state_set,
 	.port_set_host_flood	= ralink_esw_port_set_host_flood,
@@ -1430,6 +1499,7 @@ static int ralink_esw_irq_init(struct ralink_esw *esw)
 static int ralink_esw_probe(struct platform_device *pdev)
 {
     struct device *dev = &pdev->dev;
+    struct device_node *sdm_np;
     struct ralink_esw *esw;
     int ret;
 
@@ -1475,6 +1545,26 @@ static int ralink_esw_probe(struct platform_device *pdev)
         if (ret)
             return dev_err_probe(dev, ret,
                          "failed to reset EPHY\n");
+    }
+
+    /*
+     * Optional SDM (Switch DMA) syscon.
+     *
+     * SDM is only used for RX steering policy.
+     * Basic switch operation works without it.
+     */
+    sdm_np = of_parse_phandle(dev->of_node, "ralink,sdm", 0);
+    if (sdm_np) {
+	esw->sdm = syscon_node_to_regmap(sdm_np);
+	of_node_put(sdm_np);
+
+	if (IS_ERR(esw->sdm)) {
+		dev_warn(dev,
+			 "SDM syscon unavailable, RX steering disabled\n");
+		esw->sdm = NULL;
+	}
+    } else {
+	esw->sdm = NULL;
     }
 
     esw->ds = devm_kzalloc(dev, sizeof(*esw->ds), GFP_KERNEL);
