@@ -1117,6 +1117,27 @@ static int ralink_esw_port_bridge_flags(struct dsa_switch *ds, int port,
 	return 0;
 }
 
+static void ralink_esw_port_set_host_flood(struct dsa_switch *ds, int port,
+					   bool uc, bool mc)
+{
+	struct ralink_esw *esw = ds->priv;
+	u32 mask, set = 0;
+
+	if (!dsa_is_user_port(ds, port))
+		return;
+
+	mask = RALINK_ESW_SOCPC_DISUN2CPU_BIT(port) |
+	       RALINK_ESW_SOCPC_DISMC2CPU_BIT(port);
+
+	/* Bits are inverted: 1 = do not forward to CPU */
+	if (!uc)
+		set |= RALINK_ESW_SOCPC_DISUN2CPU_BIT(port);
+	if (!mc)
+		set |= RALINK_ESW_SOCPC_DISMC2CPU_BIT(port);
+
+	ralink_esw_rmw(esw, RALINK_ESW_SOCPC, mask, set);
+}
+
 static int ralink_esw_cpu_port_detect(struct ralink_esw *esw)
 {
 	struct dsa_switch *ds = esw->ds;
@@ -1317,6 +1338,7 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .port_pre_bridge_flags	= ralink_esw_port_pre_bridge_flags,
         .port_bridge_flags	= ralink_esw_port_bridge_flags,
         .port_stp_state_set     = ralink_esw_port_stp_state_set,
+	.port_set_host_flood	= ralink_esw_port_set_host_flood,
 
 	.port_fdb_dump		= ralink_esw_port_fdb_dump,
 	.port_fdb_add		= ralink_esw_port_fdb_add,
