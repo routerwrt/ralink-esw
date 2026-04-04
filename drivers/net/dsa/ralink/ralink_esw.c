@@ -1575,6 +1575,8 @@ static int ralink_esw_probe(struct platform_device *pdev)
     esw->ds->priv = esw;
     esw->ds->ops = &ralink_esw_ops;
     esw->ds->phylink_mac_ops = &ralink_esw_phylink_mac_ops;
+    esw->ds->num_ports = RALINK_ESW_NUM_PORTS_MAX;
+    esw->ds->num_tx_queues = 4;
 
     platform_set_drvdata(pdev, esw);
 
