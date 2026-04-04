@@ -6,12 +6,12 @@
 
 #define RALINK_ESW_MDIO_TIMEOUT_US         1000
 #define RALINK_ESW_NUM_PORTS               7
-#define RALINK_ESW_MAX_FRAME_LEN	1522
+#define RALINK_ESW_MAX_FRAME_LEN	   1522
 #define RALINK_ESW_MAX_MTU \
 	(RALINK_ESW_MAX_FRAME_LEN - ETH_HLEN - VLAN_HLEN)
 
-#define RALINK_ESW_NUM_VLANS		16
-#define RALINK_ESW_VID_NONE		0
+#define RALINK_ESW_NUM_VLANS		   16
+#define RALINK_ESW_VID_NONE		   0
 
 #define RALINK_ESW_ISR                     0x00
 #define RALINK_ESW_IMR                     0x04
@@ -148,6 +148,40 @@
 #define RALINK_ESW_POC2_UNTAG_EN_BIT(port) \
 	BIT(RALINK_ESW_POC2_UNTAG_EN_SHIFT + (port))
 
+/* ---- ATU / MAC table search & write ---- */
+
+#define RALINK_ESW_ATS				0x0084 /* search command */
+#define   RALINK_ESW_ATS_SEARCH_NEXT_ADDR	BIT(1)
+#define   RALINK_ESW_ATS_BEGIN_SEARCH_ADDR	BIT(0)
+
+#define RALINK_ESW_ATS0				0x0088 /* search status 0 */
+#define   RALINK_ESW_ATS0_SEARCH_RDY		BIT(0)   /* read-clear */
+#define   RALINK_ESW_ATS0_AT_TABLE_END		BIT(1)
+#define   RALINK_ESW_ATS0_R_AGE_FIELD		GENMASK(6, 4)
+#define   RALINK_ESW_ATS0_R_PORT_MAP		GENMASK(14, 8)
+#define   RALINK_ESW_ATS0_R_VID		GENMASK(18, 15)
+#define   RALINK_ESW_ATS0_R_MC_INGRESS		BIT(19)
+
+#define RALINK_ESW_ATS1				0x008c /* search status 1 */
+#define RALINK_ESW_ATS2				0x0090 /* search status 2 */
+
+#define RALINK_ESW_WMAD0			0x0094 /* write MAC address 0 */
+#define   RALINK_ESW_WMAD0_W_MAC_DONE		BIT(0)   /* read-clear */
+#define   RALINK_ESW_WMAD0_W_MAC_CMD		BIT(1)
+#define   RALINK_ESW_WMAD0_W_AGE_FIELD		GENMASK(6, 4)
+#define   RALINK_ESW_WMAD0_W_PORT_MAP		GENMASK(14, 8)
+#define   RALINK_ESW_WMAD0_W_INDEX		GENMASK(18, 15)
+#define   RALINK_ESW_WMAD0_W_MC_INGRESS		BIT(19)
+
+#define RALINK_ESW_WMAD1			0x0098 /* write MAC address 1 */
+#define RALINK_ESW_WMAD2			0x009c /* write MAC address 2 */
+
+/* ATU age encoding */
+#define RALINK_ESW_ATU_AGE_INVALID		0
+#define RALINK_ESW_ATU_AGE_STATIC		7
+
+#define RALINK_ESW_ATU_TIMEOUT_US		1000
+
 /* ---- Packed VLAN tables ---- */
 #define RALINK_ESW_PVIDC_BASE		0x0040
 #define RALINK_ESW_VLANI_BASE		0x0050
@@ -212,6 +246,16 @@ static inline u32 ralink_esw_vub_mask(unsigned int slot)
 	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2, RALINK_ESW_TBL_WID_UTG);
 }
 
+struct ralink_esw_atu_entry {
+	u8 mac[ETH_ALEN];
+	u8 port_mask;
+	u8 vlan_idx;
+	u8 age_field;
+	u16 vid;
+	bool is_static;
+	bool is_multicast;
+};
+
 struct ralink_esw_port {
 	bool vlan_filtering;
 	bool learning;
@@ -246,6 +290,8 @@ struct ralink_esw {
 
 	struct ralink_esw_port ports[RALINK_ESW_NUM_PORTS];
 	int cpu_port;
+
+	struct mutex fdb_mutex;
 };
 
 #endif /* _RALINK_ESW_DSA_H_ */

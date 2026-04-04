@@ -501,6 +501,23 @@ static void ralink_esw_free_vlan_slot(struct ralink_esw *esw, int i)
 	ralink_esw_vlan_write(esw, i);
 }
 
+static inline u16 ralink_esw_vlan_from_idx(struct ralink_esw *esw,
+					   unsigned int idx)
+{
+	if (idx >= RALINK_ESW_NUM_VLANS)
+		return RALINK_ESW_VID_NONE;
+
+	if (!test_bit(idx, esw->vlan_slot))
+		return RALINK_ESW_VID_NONE;
+
+	return esw->vlan_vid[idx];
+}
+
+static int ralink_esw_vlan_to_idx(struct ralink_esw *esw, u16 vid)
+{
+	return ralink_esw_find_vlan_slot(esw, vid);
+}
+
 static int ralink_esw_port_commit_pvid(struct ralink_esw *esw, int port)
 {
 	struct ralink_esw_port *p = &esw->ports[port];
@@ -679,6 +696,322 @@ static int ralink_esw_tag_8021q_vlan_del(struct dsa_switch *ds, int port, u16 vi
 	}
 
 	return 0;
+}
+
+
+static int ralink_esw_atu_wait_ready(struct ralink_esw *esw)
+{
+	u32 val;
+
+	return readl_poll_timeout(esw->base + RALINK_ESW_ATS0, val,
+				  val & RALINK_ESW_ATS0_SEARCH_RDY,
+				  1, RALINK_ESW_ATU_TIMEOUT_US);
+}
+
+static int ralink_esw_atu_wait_write_done(struct ralink_esw *esw)
+{
+	u32 val;
+
+	return readl_poll_timeout(esw->base + RALINK_ESW_WMAD0, val,
+				  val & RALINK_ESW_WMAD0_W_MAC_DONE,
+				  1, RALINK_ESW_ATU_TIMEOUT_US);
+}
+
+static void ralink_esw_atu_mac_from_regs(u32 ats1, u32 ats2, u8 *mac)
+{
+	/* ATS1[15:0] = MAC[15:0], ATS2[31:0] = MAC[47:16] */
+	mac[0] = (ats1 >> 8) & 0xff;
+	mac[1] = ats1 & 0xff;
+	mac[2] = (ats2 >> 24) & 0xff;
+	mac[3] = (ats2 >> 16) & 0xff;
+	mac[4] = (ats2 >> 8) & 0xff;
+	mac[5] = ats2 & 0xff;
+}
+
+static void ralink_esw_atu_mac_to_regs(const u8 *mac, u32 *wmad1, u32 *wmad2)
+{
+	*wmad1 = (mac[0] << 8) | mac[1];
+	*wmad2 = (mac[2] << 24) | (mac[3] << 16) |
+		 (mac[4] << 8) | mac[5];
+}
+
+static int ralink_esw_atu_cmd(struct ralink_esw *esw, bool first)
+{
+	u32 cmd = first ? RALINK_ESW_ATS_BEGIN_SEARCH_ADDR :
+			  RALINK_ESW_ATS_SEARCH_NEXT_ADDR;
+
+	ralink_esw_w32(esw, RALINK_ESW_ATS, cmd);
+
+	return ralink_esw_atu_wait_ready(esw);
+}
+
+/*
+ * Returns:
+ *   < 0 on error
+ *   0 if entry is invalid and should be skipped
+ *   1 if a valid entry was parsed into @ent
+ */
+static int ralink_esw_atu_read_entry(struct ralink_esw *esw,
+				     struct ralink_esw_atu_entry *ent,
+				     bool first, bool *end)
+{
+	u32 ats0, ats1, ats2;
+	u8 vlan_idx;
+
+	if (ralink_esw_atu_cmd(esw, first))
+		return -ETIMEDOUT;
+
+	/*
+	 * SEARCH_RDY is read-clear, so read ATS0 once and keep it.
+	 * ATS1/ATS2 can then be read for the MAC payload.
+	 */
+	ats0 = ralink_esw_r32(esw, RALINK_ESW_ATS0);
+	ats1 = ralink_esw_r32(esw, RALINK_ESW_ATS1);
+	ats2 = ralink_esw_r32(esw, RALINK_ESW_ATS2);
+
+	*end = !!(ats0 & RALINK_ESW_ATS0_AT_TABLE_END);
+
+	ent->age_field = FIELD_GET(RALINK_ESW_ATS0_R_AGE_FIELD, ats0);
+	if (!ent->age_field)
+		return 0;
+
+	ralink_esw_atu_mac_from_regs(ats1, ats2, ent->mac);
+
+	ent->port_mask = FIELD_GET(RALINK_ESW_ATS0_R_PORT_MAP, ats0);
+	vlan_idx = FIELD_GET(RALINK_ESW_ATS0_R_VID, ats0);
+	ent->vlan_idx = vlan_idx;
+	ent->vid = ralink_esw_vlan_from_idx(esw, vlan_idx);
+	ent->is_multicast = !!(ats0 & RALINK_ESW_ATS0_R_MC_INGRESS);
+	/* age_field 7 means static entry */
+	ent->is_static = ent->age_field == 7;
+
+	return 1;
+}
+
+static int ralink_esw_atu_find(struct ralink_esw *esw, const u8 *mac, u16 vid,
+			       bool is_multicast,
+			       struct ralink_esw_atu_entry *match)
+{
+	struct ralink_esw_atu_entry ent;
+	bool first = true, end = false;
+	int ret;
+
+	while (!end) {
+		ret = ralink_esw_atu_read_entry(esw, &ent, first, &end);
+		first = false;
+		if (ret < 0)
+			return ret;
+		if (!ret)
+			continue;
+
+		if (ent.vid != vid)
+			continue;
+		if (ent.is_multicast != is_multicast)
+			continue;
+		if (!ether_addr_equal(ent.mac, mac))
+			continue;
+
+		*match = ent;
+		return 0;
+	}
+
+	return -ENOENT;
+}
+
+/*
+ * delete entry: age_field = RALINK_ESW_ATU_AGE_INVALID, port_mask = 0
+ * static entry: age_field = RALINK_ESW_ATU_AGE_STATIC
+ */
+static int ralink_esw_atu_write(struct ralink_esw *esw, const u8 *mac, u16 vid,
+				u8 port_mask, u8 age_field,
+				bool is_multicast)
+{
+	u32 wmad0, wmad1, wmad2;
+	int vlan_idx, ret;
+
+	vlan_idx = ralink_esw_vlan_to_idx(esw, vid);
+	if (vlan_idx < 0)
+		return vlan_idx;
+
+	ralink_esw_atu_mac_to_regs(mac, &wmad1, &wmad2);
+
+	wmad0 = FIELD_PREP(RALINK_ESW_WMAD0_W_PORT_MAP, port_mask) |
+		FIELD_PREP(RALINK_ESW_WMAD0_W_INDEX, vlan_idx) |
+		FIELD_PREP(RALINK_ESW_WMAD0_W_AGE_FIELD, age_field);
+
+	if (is_multicast)
+		wmad0 |= RALINK_ESW_WMAD0_W_MC_INGRESS;
+
+	ralink_esw_w32(esw, RALINK_ESW_WMAD1, wmad1);
+	ralink_esw_w32(esw, RALINK_ESW_WMAD2, wmad2);
+	ralink_esw_w32(esw, RALINK_ESW_WMAD0,
+		       wmad0 | RALINK_ESW_WMAD0_W_MAC_CMD);
+
+	ret = ralink_esw_atu_wait_write_done(esw);
+	if (ret)
+		return ret;
+
+	/* W_MAC_DONE is read-clear */
+	ralink_esw_r32(esw, RALINK_ESW_WMAD0);
+
+	return 0;
+}
+
+static int ralink_esw_port_fdb_dump(struct dsa_switch *ds, int port,
+				    dsa_fdb_dump_cb_t *cb, void *data)
+{
+	struct ralink_esw *esw = ds->priv;
+	struct ralink_esw_atu_entry ent;
+	bool first = true, end = false;
+	int ret;
+
+	mutex_lock(&esw->fdb_mutex);
+
+	while (!end) {
+		ret = ralink_esw_atu_read_entry(esw, &ent, first, &end);
+		first = false;
+		if (ret < 0)
+			goto out;
+		if (!ret)
+			continue;
+
+		if (ent.is_multicast)
+			continue;
+		if (!(ent.port_mask & BIT(port)))
+			continue;
+
+		/* Hide private dsa_8021q VLANs from userspace */
+		if (vid_is_dsa_8021q(ent.vid))
+			ent.vid = 0;
+
+		ret = cb(ent.mac, ent.vid, ent.is_static, data);
+		if (ret)
+			goto out;
+	}
+
+	ret = 0;
+
+out:
+	mutex_unlock(&esw->fdb_mutex);
+	return ret;
+}
+
+static int ralink_esw_db_vid(struct dsa_db db)
+{
+	switch (db.type) {
+	case DSA_DB_PORT:
+		return dsa_tag_8021q_standalone_vid(db.dp);
+	case DSA_DB_BRIDGE:
+		return dsa_tag_8021q_bridge_vid(db.bridge.num);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int ralink_esw_port_fdb_add(struct dsa_switch *ds, int port,
+				   const unsigned char *addr, u16 vid,
+				   struct dsa_db db)
+{
+	struct ralink_esw *esw = ds->priv;
+	int ret, fdb_vid = vid;
+
+	if (!fdb_vid)
+		fdb_vid = ralink_esw_db_vid(db);
+
+	if (fdb_vid < 0)
+		return fdb_vid;
+
+	mutex_lock(&esw->fdb_mutex);
+	ret = ralink_esw_atu_write(esw, addr, fdb_vid, BIT(port),
+			   RALINK_ESW_ATU_AGE_STATIC, false);
+	mutex_unlock(&esw->fdb_mutex);
+
+	return ret;
+}
+
+static int ralink_esw_port_fdb_del(struct dsa_switch *ds, int port,
+				   const unsigned char *addr, u16 vid,
+				   struct dsa_db db)
+{
+	struct ralink_esw *esw = ds->priv;
+	int ret, fdb_vid = vid;
+
+	if (!fdb_vid)
+		fdb_vid = ralink_esw_db_vid(db);
+
+	if (fdb_vid < 0)
+		return fdb_vid;
+
+	mutex_lock(&esw->fdb_mutex);
+	ret = ralink_esw_atu_write(esw, addr, fdb_vid, 0,
+			   RALINK_ESW_ATU_AGE_INVALID, false);
+	mutex_unlock(&esw->fdb_mutex);
+
+	return ret;
+}
+
+static int ralink_esw_port_mdb_add(struct dsa_switch *ds, int port,
+				   const struct switchdev_obj_port_mdb *mdb,
+				   struct dsa_db db)
+{
+	struct ralink_esw *esw = ds->priv;
+	struct ralink_esw_atu_entry ent;
+	u8 port_mask;
+	int ret, mdb_vid = mdb->vid;
+
+	if (!mdb_vid)
+		mdb_vid = ralink_esw_db_vid(db);
+
+	if (mdb_vid < 0)
+		return mdb_vid;
+
+	mutex_lock(&esw->fdb_mutex);
+	ret = ralink_esw_atu_find(esw, mdb->addr, mdb_vid, true, &ent);
+	if (ret == -ENOENT) {
+		port_mask = BIT(port);
+	} else if (ret) {
+		goto out;
+	} else {
+		port_mask = ent.port_mask | BIT(port);
+	}
+
+	ret = ralink_esw_atu_write(esw, mdb->addr, mdb_vid, port_mask,
+			   RALINK_ESW_ATU_AGE_STATIC, false);
+out:
+	mutex_unlock(&esw->fdb_mutex);
+	return ret;
+}
+
+static int ralink_esw_port_mdb_del(struct dsa_switch *ds, int port,
+				   const struct switchdev_obj_port_mdb *mdb,
+				   struct dsa_db db)
+{
+	struct ralink_esw *esw = ds->priv;
+	struct ralink_esw_atu_entry ent;
+	u8 port_mask;
+	int ret, mdb_vid = mdb->vid;
+
+	if (!mdb_vid)
+		mdb_vid = ralink_esw_db_vid(db);
+
+	if (mdb_vid < 0)
+		return mdb_vid;
+
+	mutex_lock(&esw->fdb_mutex);
+
+	ret = ralink_esw_atu_find(esw, mdb->addr, mdb_vid, true, &ent);
+	if (ret)
+		goto out;
+
+	port_mask = ent.port_mask & ~BIT(port);
+
+	ret = ralink_esw_atu_write(esw, mdb->addr, mdb_vid, port_mask,
+			   port_mask ? RALINK_ESW_ATU_AGE_STATIC : 
+			   	       RALINK_ESW_ATU_AGE_INVALID, false);
+
+out:
+	mutex_unlock(&esw->fdb_mutex);
+	return ret;
 }
 
 static int ralink_esw_port_max_mtu(struct dsa_switch *ds, int port)
@@ -985,6 +1318,12 @@ static const struct dsa_switch_ops ralink_esw_ops = {
         .port_bridge_flags	= ralink_esw_port_bridge_flags,
         .port_stp_state_set     = ralink_esw_port_stp_state_set,
 
+	.port_fdb_dump		= ralink_esw_port_fdb_dump,
+	.port_fdb_add		= ralink_esw_port_fdb_add,
+	.port_fdb_del		= ralink_esw_port_fdb_del,
+	.port_mdb_add		= ralink_esw_port_mdb_add,
+	.port_mdb_del		= ralink_esw_port_mdb_del,
+
         .tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
         .tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
 
@@ -1122,6 +1461,8 @@ static int ralink_esw_probe(struct platform_device *pdev)
     ret = ralink_esw_mdio_register(esw);
     if (ret)
         return ret;
+
+    mutex_init(&esw->fdb_mutex);
 
     ret = dsa_register_switch(esw->ds);
     if (ret)
