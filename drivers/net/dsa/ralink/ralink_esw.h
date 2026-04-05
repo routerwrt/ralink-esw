@@ -4,6 +4,7 @@
 
 #include <linux/if_vlan.h>
 #include <linux/regmap.h>
+#include <linux/workqueue.h>
 
 #define RALINK_ESW_MDIO_TIMEOUT_US         1000
 #define RALINK_ESW_NUM_PORTS               7
@@ -171,6 +172,20 @@
 #define RALINK_ESW_POC2_UNTAG_EN_BIT(port) \
 	BIT(RALINK_ESW_POC2_UNTAG_EN_SHIFT + (port))
 
+#define RALINK_ESW_STATS_POLL_INTERVAL		(2 * HZ)
+
+#define RALINK_ESW_P0PC            		0x00e8 /* Port 0 RX packet counter */
+#define RALINK_ESW_P0TPC        		0x0150 /* Port 0 TX packet counter */
+#define RALINK_ESW_PCRI            		0x014c /* Packet counter recycle */
+
+#define   RALINK_ESW_PKT_CNT_GOOD		GENMASK(15, 0)
+#define   RALINK_ESW_PKT_CNT_BAD		GENMASK(31, 16)
+
+#define   RALINK_ESW_PCRI_GOOD_PKT_REC(port)    BIT(port)
+#define   RALINK_ESW_PCRI_BADD_PKT_REC(port)    BIT((port) + 8)
+#define   RALINK_ESW_PCRI_TXOK_PKT_REC(port)    BIT((port) + 16)
+#define   RALINK_ESW_PCRI_TCOL_PKT_REC(port)    BIT((port) + 24)
+
 /* ---- ATU / MAC table search & write ---- */
 
 #define RALINK_ESW_ATS				0x0084 /* search command */
@@ -182,7 +197,7 @@
 #define   RALINK_ESW_ATS0_AT_TABLE_END		BIT(1)
 #define   RALINK_ESW_ATS0_R_AGE_FIELD		GENMASK(6, 4)
 #define   RALINK_ESW_ATS0_R_PORT_MAP		GENMASK(14, 8)
-#define   RALINK_ESW_ATS0_R_VID		GENMASK(18, 15)
+#define   RALINK_ESW_ATS0_R_VID			GENMASK(18, 15)
 #define   RALINK_ESW_ATS0_R_MC_INGRESS		BIT(19)
 
 #define RALINK_ESW_ATS1				0x008c /* search status 1 */
@@ -269,6 +284,13 @@ static inline u32 ralink_esw_vub_mask(unsigned int slot)
 	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2, RALINK_ESW_TBL_WID_UTG);
 }
 
+struct ralink_esw_port_stats {
+    u64 rx_good_pkts;
+    u64 rx_bad_pkts;
+    u64 tx_good_pkts;
+    u64 tx_bad_pkts;
+};
+
 struct ralink_esw_atu_entry {
 	u8 mac[ETH_ALEN];
 	u8 port_mask;
@@ -316,6 +338,11 @@ struct ralink_esw {
 	int cpu_port;
 
 	struct mutex fdb_mutex;
+
+	struct delayed_work stats_work;
+	struct ralink_esw_port_stats stats[RALINK_ESW_NUM_PORTS];
+	struct mutex reg_mutex;
+	bool stats_running;
 };
 
 #endif /* _RALINK_ESW_DSA_H_ */

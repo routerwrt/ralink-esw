@@ -395,6 +395,105 @@ static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
 	.mac_link_up	= ralink_esw_mac_link_up,
 };
 
+static const char ralink_esw_stats_strings[][ETH_GSTRING_LEN] = {
+    "rx_good_pkts",
+    "rx_bad_pkts",
+    "tx_good_pkts",
+    "tx_bad_pkts",
+};
+
+static void ralink_esw_stats_update(struct ralink_esw *esw)
+{
+	struct dsa_switch *ds = esw->ds;
+	u32 recycle = 0;
+	int port;
+
+	mutex_lock(&esw->reg_mutex);
+	for (port = 0; port < ds->num_ports; port++) {
+        	u32 rx, tx;
+
+        	if (!dsa_is_user_port(ds, port))
+            		continue;
+
+        	rx = ralink_esw_r32(esw, RALINK_ESW_P0PC + port * 4);
+        	tx = ralink_esw_r32(esw, RALINK_ESW_P0TPC + port * 4);
+
+		esw->stats[port].rx_good_pkts +=
+        		FIELD_GET(RALINK_ESW_PKT_CNT_GOOD, rx);
+		esw->stats[port].rx_bad_pkts +=
+			FIELD_GET(RALINK_ESW_PKT_CNT_BAD, rx);
+
+		esw->stats[port].tx_good_pkts +=
+			FIELD_GET(RALINK_ESW_PKT_CNT_GOOD, tx);
+		esw->stats[port].tx_bad_pkts +=
+			FIELD_GET(RALINK_ESW_PKT_CNT_BAD, tx);
+
+		recycle |= RALINK_ESW_PCRI_GOOD_PKT_REC(port);
+		recycle |= RALINK_ESW_PCRI_BADD_PKT_REC(port);
+		recycle |= RALINK_ESW_PCRI_TXOK_PKT_REC(port);
+		recycle |= RALINK_ESW_PCRI_TCOL_PKT_REC(port);
+	}
+
+	ralink_esw_w32(esw, RALINK_ESW_PCRI, recycle);
+
+	mutex_unlock(&esw->reg_mutex);
+}
+
+static void ralink_esw_stats_work(struct work_struct *work)
+{
+	struct ralink_esw *esw;
+
+	esw = container_of(to_delayed_work(work), struct ralink_esw,
+               stats_work);
+
+	ralink_esw_stats_update(esw);
+    	schedule_delayed_work(&esw->stats_work, RALINK_ESW_STATS_POLL_INTERVAL);
+}
+
+static void ralink_esw_stats_init(struct ralink_esw *esw)
+{
+	INIT_DELAYED_WORK(&esw->stats_work, ralink_esw_stats_work);
+	schedule_delayed_work(&esw->stats_work, RALINK_ESW_STATS_POLL_INTERVAL);
+}
+
+static void ralink_esw_stats_deinit(struct ralink_esw *esw)
+{
+	cancel_delayed_work_sync(&esw->stats_work);
+}
+
+static void ralink_esw_get_strings(struct dsa_switch *ds, int port,
+                   u32 stringset, u8 *data)
+{
+	if (stringset != ETH_SS_STATS)
+        	return;
+
+	memcpy(data, ralink_esw_stats_strings,
+		sizeof(ralink_esw_stats_strings));
+}
+
+static int ralink_esw_get_sset_count(struct dsa_switch *ds, int port, int sset)
+{
+	if (sset != ETH_SS_STATS)
+        	return 0;
+
+	return ARRAY_SIZE(ralink_esw_stats_strings);
+}
+
+static void ralink_esw_get_ethtool_stats(struct dsa_switch *ds, int port,
+                     u64 *data)
+{
+	struct ralink_esw *esw = ds->priv;
+
+	mutex_lock(&esw->reg_mutex);
+
+	data[0] = esw->stats[port].rx_good_pkts;
+	data[1] = esw->stats[port].rx_bad_pkts;
+	data[2] = esw->stats[port].tx_good_pkts;
+	data[3] = esw->stats[port].tx_bad_pkts;
+
+	mutex_unlock(&esw->reg_mutex);
+}
+
 static inline void ralink_esw_set_field(struct ralink_esw *esw, u32 base,
 					u16 idx, u16 width, u16 per_reg,
 					u32 val)
@@ -1376,6 +1475,7 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	}
 
 	ralink_esw_sdm_set_prio_baseline(esw);
+	ralink_esw_stats_init(esw);
 
 	rtnl_lock();
 	ret = dsa_tag_8021q_register(ds, htons(ETH_P_8021Q));
@@ -1386,6 +1486,10 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 
 static void ralink_esw_teardown(struct dsa_switch *ds)
 {
+	struct ralink_esw *esw = ds->priv;
+
+	ralink_esw_stats_deinit(esw);
+
 	rtnl_lock();
 	dsa_tag_8021q_unregister(ds);
 	rtnl_unlock();
@@ -1426,6 +1530,11 @@ static const struct dsa_switch_ops ralink_esw_ops = {
 
         .tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
         .tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
+
+	.get_strings		= ralink_esw_get_strings,
+	.get_sset_count		= ralink_esw_get_sset_count,
+	.get_ethtool_stats	= ralink_esw_get_ethtool_stats,
+
 
         /* phylink */
         .phylink_get_caps    = ralink_esw_phylink_get_caps,
@@ -1575,7 +1684,7 @@ static int ralink_esw_probe(struct platform_device *pdev)
     esw->ds->priv = esw;
     esw->ds->ops = &ralink_esw_ops;
     esw->ds->phylink_mac_ops = &ralink_esw_phylink_mac_ops;
-    esw->ds->num_ports = RALINK_ESW_NUM_PORTS_MAX;
+    esw->ds->num_ports = RALINK_ESW_NUM_PORTS;
     esw->ds->num_tx_queues = 4;
 
     platform_set_drvdata(pdev, esw);
@@ -1586,6 +1695,7 @@ static int ralink_esw_probe(struct platform_device *pdev)
         return ret;
 
     mutex_init(&esw->fdb_mutex);
+    mutex_init(&esw->reg_mutex);
 
     ret = dsa_register_switch(esw->ds);
     if (ret)
