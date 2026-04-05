@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: GPL-2.0
 /*
  * DSA switch driver for the classic Ralink/MediaTek embedded switch (ESW)
@@ -20,12 +19,12 @@
 
 static inline u32 ralink_esw_r32(struct ralink_esw *esw, u32 reg)
 {
-    return readl_relaxed(esw->base + reg);
+	return readl_relaxed(esw->base + reg);
 }
 
 static inline void ralink_esw_w32(struct ralink_esw *esw, u32 reg, u32 val)
 {
-    writel_relaxed(val, esw->base + reg);
+	writel_relaxed(val, esw->base + reg);
 }
 
 static inline void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set)
@@ -46,131 +45,131 @@ static inline void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32
  */
 static inline void ralink_esw_mdio_ack(struct ralink_esw *esw)
 {
-    ralink_esw_r32(esw, RALINK_ESW_PCR1);
+	ralink_esw_r32(esw, RALINK_ESW_PCR1);
 }
 
 static int ralink_esw_mdio_wait(struct ralink_esw *esw, u32 mask)
 {
-    u32 val;
+	u32 val;
 
-    return readl_poll_timeout(esw->base + RALINK_ESW_PCR1, val,
-                  val & mask, 1,
-                  RALINK_ESW_MDIO_TIMEOUT_US);
+	return readl_poll_timeout(esw->base + RALINK_ESW_PCR1, val,
+				val & mask, 1,
+				RALINK_ESW_MDIO_TIMEOUT_US);
 }
 
 static int ralink_esw_phy_read(struct ralink_esw *esw, int phy, int reg, u16 *val)
 {
-    u32 pcr1;
-    int ret;
+	u32 pcr1;
+	int ret;
 
-    mutex_lock(&esw->mdio_lock);
+	mutex_lock(&esw->mdio_lock);
 
-    ralink_esw_mdio_ack(esw);
+	ralink_esw_mdio_ack(esw);
 
-    ralink_esw_w32(esw, RALINK_ESW_PCR0,
-        RALINK_ESW_PCR0_RD_PHY_CMD |
-        FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
-        FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
+	ralink_esw_w32(esw, RALINK_ESW_PCR0,
+		RALINK_ESW_PCR0_RD_PHY_CMD |
+			FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
+			FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
 
-    ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_RD_RDY);
-    if (ret) {
-        dev_err(esw->dev, "MDIO read timeout: phy=%d reg=%d\n",
-            phy, reg);
-        goto out;
-    }
+	ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_RD_RDY);
+	if (ret) {
+		dev_err(esw->dev, "MDIO read timeout: phy=%d reg=%d\n",
+		phy, reg);
+		goto out;
+	}
 
-    pcr1 = ralink_esw_r32(esw, RALINK_ESW_PCR1);
-    *val = FIELD_GET(RALINK_ESW_PCR1_RD_DATA, pcr1);
+	pcr1 = ralink_esw_r32(esw, RALINK_ESW_PCR1);
+	*val = FIELD_GET(RALINK_ESW_PCR1_RD_DATA, pcr1);
 
 out:
-    mutex_unlock(&esw->mdio_lock);
+	mutex_unlock(&esw->mdio_lock);
 
-    return ret;
+	return ret;
 }
 
 static int ralink_esw_phy_write(struct ralink_esw *esw, int phy, int reg, u16 val)
 {
-    int ret;
+	int ret;
 
-    mutex_lock(&esw->mdio_lock);
+	mutex_lock(&esw->mdio_lock);
 
-    ralink_esw_mdio_ack(esw);
+	ralink_esw_mdio_ack(esw);
 
-    ralink_esw_w32(esw, RALINK_ESW_PCR0,
-        RALINK_ESW_PCR0_WT_PHY_CMD |
-        FIELD_PREP(RALINK_ESW_PCR0_WT_DATA, val) |
-        FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
-        FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
+	ralink_esw_w32(esw, RALINK_ESW_PCR0,
+			RALINK_ESW_PCR0_WT_PHY_CMD |
+			FIELD_PREP(RALINK_ESW_PCR0_WT_DATA, val) |
+		FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
+			FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
 
-    ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_WT_DONE);
-    if (ret) {
-        dev_err(esw->dev, "MDIO write timeout: phy=%d reg=%d\n",
-            phy, reg);
-        goto out;
-    }
+	ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_WT_DONE);
+	if (ret) {
+		dev_err(esw->dev, "MDIO write timeout: phy=%d reg=%d\n",
+		phy, reg);
+	goto out;
+	}
 
-    ralink_esw_mdio_ack(esw);
+	ralink_esw_mdio_ack(esw);
 
 out:
-    mutex_unlock(&esw->mdio_lock);
+	mutex_unlock(&esw->mdio_lock);
 
-    return ret;
+	return ret;
 }
 
 static int ralink_esw_mdio_bus_read(struct mii_bus *bus, int addr, int regnum)
 {
-    struct ralink_esw *esw = bus->priv;
-    u16 val;
-    int ret;
+	struct ralink_esw *esw = bus->priv;
+	u16 val;
+	int ret;
 
-    ret = ralink_esw_phy_read(esw, addr, regnum, &val);
-    if (ret)
-        return ret;
+	ret = ralink_esw_phy_read(esw, addr, regnum, &val);
+	if (ret)
+		return ret;
 
-    return val;
+	return val;
 }
 
-static int ralink_esw_mdio_bus_write(struct mii_bus *bus, int addr, int regnum,
-                  u16 val)
+static int ralink_esw_mdio_bus_write(struct mii_bus *bus, int addr,
+					int regnum, u16 val)
 {
-    struct ralink_esw *esw = bus->priv;
+	struct ralink_esw *esw = bus->priv;
 
-    return ralink_esw_phy_write(esw, addr, regnum, val);
+	return ralink_esw_phy_write(esw, addr, regnum, val);
 }
 
 static int ralink_esw_mdio_register(struct ralink_esw *esw)
 {
-    struct device_node *mdio_np;
-    struct mii_bus *bus;
-    int ret;
+	struct device_node *mdio_np;
+	struct mii_bus *bus;
+	int ret;
 
-    mdio_np = of_get_child_by_name(esw->dev->of_node, "mdio");
-    if (!mdio_np)
-        return 0;
+	mdio_np = of_get_child_by_name(esw->dev->of_node, "mdio");
+	if (!mdio_np)
+		return 0;
 
-    bus = devm_mdiobus_alloc(esw->dev);
-    if (!bus) {
-        of_node_put(mdio_np);
-        return -ENOMEM;
-    }
+	bus = devm_mdiobus_alloc(esw->dev);
+	if (!bus) {
+		of_node_put(mdio_np);
+		return -ENOMEM;
+	}
 
-    bus->name = "ralink-esw-mdio";
-    bus->read = ralink_esw_mdio_bus_read;
-    bus->write = ralink_esw_mdio_bus_write;
-    bus->parent = esw->dev;
-    bus->priv = esw;
+	bus->name = "ralink-esw-mdio";
+	bus->read = ralink_esw_mdio_bus_read;
+	bus->write = ralink_esw_mdio_bus_write;
+	bus->parent = esw->dev;
+	bus->priv = esw;
 
-    strscpy(bus->id, dev_name(esw->dev), MII_BUS_ID_SIZE);
+	strscpy(bus->id, dev_name(esw->dev), MII_BUS_ID_SIZE);
 
-    ret = devm_of_mdiobus_register(esw->dev, bus, mdio_np);
-    of_node_put(mdio_np);
-    if (ret)
-        return dev_err_probe(esw->dev, ret,
-                     "failed to register MDIO bus\n");
+	ret = devm_of_mdiobus_register(esw->dev, bus, mdio_np);
+	of_node_put(mdio_np);
+	if (ret)
+		return dev_err_probe(esw->dev, ret,
+				"failed to register MDIO bus\n");
 
-    esw->mdio_bus = bus;
+	esw->mdio_bus = bus;
 
-    return 0;
+	return 0;
 }
 
 static inline u32 ralink_esw_port_bit(unsigned int shift, unsigned int port)
@@ -396,10 +395,10 @@ static const struct phylink_mac_ops ralink_esw_phylink_mac_ops = {
 };
 
 static const char ralink_esw_stats_strings[][ETH_GSTRING_LEN] = {
-    "rx_good_pkts",
-    "rx_bad_pkts",
-    "tx_good_pkts",
-    "tx_bad_pkts",
+	"rx_good_pkts",
+	"rx_bad_pkts",
+	"tx_good_pkts",
+	"tx_bad_pkts",
 };
 
 static void ralink_esw_stats_update(struct ralink_esw *esw)
@@ -410,16 +409,16 @@ static void ralink_esw_stats_update(struct ralink_esw *esw)
 
 	mutex_lock(&esw->reg_mutex);
 	for (port = 0; port < ds->num_ports; port++) {
-        	u32 rx, tx;
+		u32 rx, tx;
 
-        	if (!dsa_is_user_port(ds, port))
-            		continue;
+		if (!dsa_is_user_port(ds, port))
+			continue;
 
-        	rx = ralink_esw_r32(esw, RALINK_ESW_P0PC + port * 4);
-        	tx = ralink_esw_r32(esw, RALINK_ESW_P0TPC + port * 4);
+		rx = ralink_esw_r32(esw, RALINK_ESW_P0PC + port * 4);
+		tx = ralink_esw_r32(esw, RALINK_ESW_P0TPC + port * 4);
 
 		esw->stats[port].rx_good_pkts +=
-        		FIELD_GET(RALINK_ESW_PKT_CNT_GOOD, rx);
+		FIELD_GET(RALINK_ESW_PKT_CNT_GOOD, rx);
 		esw->stats[port].rx_bad_pkts +=
 			FIELD_GET(RALINK_ESW_PKT_CNT_BAD, rx);
 
@@ -444,10 +443,10 @@ static void ralink_esw_stats_work(struct work_struct *work)
 	struct ralink_esw *esw;
 
 	esw = container_of(to_delayed_work(work), struct ralink_esw,
-               stats_work);
+			stats_work);
 
 	ralink_esw_stats_update(esw);
-    	schedule_delayed_work(&esw->stats_work, RALINK_ESW_STATS_POLL_INTERVAL);
+	schedule_delayed_work(&esw->stats_work, RALINK_ESW_STATS_POLL_INTERVAL);
 }
 
 static void ralink_esw_stats_init(struct ralink_esw *esw)
@@ -462,25 +461,26 @@ static void ralink_esw_stats_deinit(struct ralink_esw *esw)
 }
 
 static void ralink_esw_get_strings(struct dsa_switch *ds, int port,
-                   u32 stringset, u8 *data)
+					u32 stringset, u8 *data)
 {
 	if (stringset != ETH_SS_STATS)
-        	return;
+		return;
 
 	memcpy(data, ralink_esw_stats_strings,
 		sizeof(ralink_esw_stats_strings));
 }
 
-static int ralink_esw_get_sset_count(struct dsa_switch *ds, int port, int sset)
+static int ralink_esw_get_sset_count(struct dsa_switch *ds, int port,
+					int sset)
 {
 	if (sset != ETH_SS_STATS)
-        	return 0;
+		return 0;
 
 	return ARRAY_SIZE(ralink_esw_stats_strings);
 }
 
 static void ralink_esw_get_ethtool_stats(struct dsa_switch *ds, int port,
-                     u64 *data)
+					u64 *data)
 {
 	struct ralink_esw *esw = ds->priv;
 
@@ -711,10 +711,10 @@ static int ralink_esw_port_vlan_del(struct dsa_switch *ds, int port,
 				    const struct switchdev_obj_port_vlan *vlan)
 {
 	struct ralink_esw *esw = ds->priv;
- 	u16 vid = vlan->vid;
+	u16 vid = vlan->vid;
 	int slot;
 
- 	slot = ralink_esw_find_vlan_slot(esw, vid);
+	slot = ralink_esw_find_vlan_slot(esw, vid);
 	if (slot < 0)
 		return 0;
 
@@ -736,7 +736,7 @@ static int ralink_esw_tag_8021q_vlan_add(struct dsa_switch *ds, int port,
 	bool untagged = flags & BRIDGE_VLAN_INFO_UNTAGGED;
 	bool pvid = flags & BRIDGE_VLAN_INFO_PVID;
 	int slot, err;
-	
+
 	slot = ralink_esw_alloc_vlan_slot(esw, vid);
 	if (slot < 0)
 		return slot;
@@ -1068,13 +1068,12 @@ static int ralink_esw_port_mdb_add(struct dsa_switch *ds, int port,
 
 	mutex_lock(&esw->fdb_mutex);
 	ret = ralink_esw_atu_find(esw, mdb->addr, mdb_vid, true, &ent);
-	if (ret == -ENOENT) {
+	if (ret == -ENOENT)
 		port_mask = BIT(port);
-	} else if (ret) {
+	else if (ret)
 		goto out;
-	} else {
+	else
 		port_mask = ent.port_mask | BIT(port);
-	}
 
 	ret = ralink_esw_atu_write(esw, mdb->addr, mdb_vid, port_mask,
 			   RALINK_ESW_ATU_AGE_STATIC, false);
@@ -1107,8 +1106,8 @@ static int ralink_esw_port_mdb_del(struct dsa_switch *ds, int port,
 	port_mask = ent.port_mask & ~BIT(port);
 
 	ret = ralink_esw_atu_write(esw, mdb->addr, mdb_vid, port_mask,
-			   port_mask ? RALINK_ESW_ATU_AGE_STATIC : 
-			   	       RALINK_ESW_ATU_AGE_INVALID, false);
+				port_mask ? RALINK_ESW_ATU_AGE_STATIC :
+					RALINK_ESW_ATU_AGE_INVALID, false);
 
 out:
 	mutex_unlock(&esw->fdb_mutex);
@@ -1193,7 +1192,7 @@ static int ralink_esw_port_bridge_join(struct dsa_switch *ds, int port,
 
 	/* Bridged traffic uses normal/default priority. */
 	ralink_esw_port_set_default_prio(esw, port, 0);
-        ralink_esw_sdm_set_port_ring(esw, port, false);
+	ralink_esw_sdm_set_port_ring(esw, port, false);
 
 	return 0;
 }
@@ -1207,7 +1206,7 @@ static void ralink_esw_port_bridge_leave(struct dsa_switch *ds, int port,
 
 	/* Standalone traffic uses the reserved steering class. */
 	ralink_esw_port_set_default_prio(esw, port, 2);
-        ralink_esw_sdm_set_port_ring(esw, port, true);
+	ralink_esw_sdm_set_port_ring(esw, port, true);
 }
 
 static int ralink_esw_port_pre_bridge_flags(struct dsa_switch *ds, int port,
@@ -1413,14 +1412,14 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	       FIELD_PREP(RALINK_ESW_SGC_AGING_INTERVAL, 1));
 
        /*
-	 * Port control 1 baseline:
-	 * - do not punt IP multicast to CPU (handled in hardware)
-	 * - no ports in blocking state (forwarding allowed by default)
-	 * - enable MAC learning on all ports
-	 * - disable secure port mode
-	 *
-	 * STP state will override blocking and learning per port.
-	 */
+	* Port control 1 baseline:
+	* - do not punt IP multicast to CPU (handled in hardware)
+	* - no ports in blocking state (forwarding allowed by default)
+	* - enable MAC learning on all ports
+	* - disable secure port mode
+	*
+	* STP state will override blocking and learning per port.
+	*/
 	ralink_esw_rmw(esw, RALINK_ESW_POC1,
 	       RALINK_ESW_POC1_DIS_IPMC2CPU |
 	       RALINK_ESW_POC1_BLOCKING |
@@ -1452,7 +1451,7 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	       FIELD_PREP(RALINK_ESW_POC2_MLD2CPU_EN, 0) |
 	       FIELD_PREP(RALINK_ESW_POC2_IPV6_MULT_RULE, 0));
 
-        bitmap_zero(esw->vlan_slot, RALINK_ESW_NUM_VLANS);
+	bitmap_zero(esw->vlan_slot, RALINK_ESW_NUM_VLANS);
 
 	for (i = 0; i < RALINK_ESW_NUM_VLANS; i++) {
 		esw->vlan_vid[i] = RALINK_ESW_VID_NONE;
@@ -1499,27 +1498,27 @@ static enum dsa_tag_protocol ralink_esw_get_tag_protocol(struct dsa_switch *ds,
 						 int port,
 						 enum dsa_tag_protocol mp)
 {
-    return DSA_TAG_PROTO_RALINK;
+	return DSA_TAG_PROTO_RALINK;
 }
 
 static const struct dsa_switch_ops ralink_esw_ops = {
-	.get_tag_protocol    = ralink_esw_get_tag_protocol,
+	.get_tag_protocol	= ralink_esw_get_tag_protocol,
 
-	.setup		     = ralink_esw_setup,
-	.teardown	     = ralink_esw_teardown,
-        .port_enable         = ralink_esw_port_enable,
-        .port_disable        = ralink_esw_port_disable,
-        .port_max_mtu	     = ralink_esw_port_max_mtu,
+	.setup			= ralink_esw_setup,
+	.teardown		= ralink_esw_teardown,
+	.port_enable		= ralink_esw_port_enable,
+	.port_disable		= ralink_esw_port_disable,
+	.port_max_mtu		= ralink_esw_port_max_mtu,
 
-        .port_vlan_filtering	= ralink_esw_port_vlan_filtering,
-        .port_vlan_add		= ralink_esw_port_vlan_add,
-        .port_vlan_del		= ralink_esw_port_vlan_del,
+	.port_vlan_filtering	= ralink_esw_port_vlan_filtering,
+	.port_vlan_add		= ralink_esw_port_vlan_add,
+	.port_vlan_del		= ralink_esw_port_vlan_del,
 
 	.port_bridge_join	= ralink_esw_port_bridge_join,
 	.port_bridge_leave	= ralink_esw_port_bridge_leave,
 	.port_pre_bridge_flags	= ralink_esw_port_pre_bridge_flags,
-        .port_bridge_flags	= ralink_esw_port_bridge_flags,
-        .port_stp_state_set     = ralink_esw_port_stp_state_set,
+	.port_bridge_flags	= ralink_esw_port_bridge_flags,
+	.port_stp_state_set     = ralink_esw_port_stp_state_set,
 	.port_set_host_flood	= ralink_esw_port_set_host_flood,
 
 	.port_fdb_dump		= ralink_esw_port_fdb_dump,
@@ -1528,16 +1527,15 @@ static const struct dsa_switch_ops ralink_esw_ops = {
 	.port_mdb_add		= ralink_esw_port_mdb_add,
 	.port_mdb_del		= ralink_esw_port_mdb_del,
 
-        .tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
-        .tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
+	.tag_8021q_vlan_add	= ralink_esw_tag_8021q_vlan_add,
+	.tag_8021q_vlan_del	= ralink_esw_tag_8021q_vlan_del,
 
 	.get_strings		= ralink_esw_get_strings,
 	.get_sset_count		= ralink_esw_get_sset_count,
 	.get_ethtool_stats	= ralink_esw_get_ethtool_stats,
 
-
-        /* phylink */
-        .phylink_get_caps    = ralink_esw_phylink_get_caps,
+	/* phylink */
+	.phylink_get_caps	= ralink_esw_phylink_get_caps,
 };
 
 static void ralink_esw_phylink_mac_change(struct ralink_esw *esw, int port,
@@ -1580,11 +1578,11 @@ static int ralink_esw_irq_init(struct ralink_esw *esw)
 {
 	int irq, ret;
 
-        irq = platform_get_irq_optional(to_platform_device(esw->dev), 0);
-        if (irq == -ENXIO)
-	        return 0;
-        if (irq < 0)
-	        return irq;
+	irq = platform_get_irq_optional(to_platform_device(esw->dev), 0);
+	if (irq == -ENXIO)
+		return 0;
+	if (irq < 0)
+		return irq;
 
 	esw->link_state = ralink_esw_r32(esw, RALINK_ESW_POA) >>
 			  RALINK_ESW_POA_LINK_SHIFT;
@@ -1607,129 +1605,125 @@ static int ralink_esw_irq_init(struct ralink_esw *esw)
 
 static int ralink_esw_probe(struct platform_device *pdev)
 {
-    struct device *dev = &pdev->dev;
-    struct device_node *sdm_np;
-    struct ralink_esw *esw;
-    int ret;
+	struct device *dev = &pdev->dev;
+	struct device_node *sdm_np;
+	struct ralink_esw *esw;
+	int ret;
 
-    esw = devm_kzalloc(dev, sizeof(*esw), GFP_KERNEL);
-    if (!esw)
-        return -ENOMEM;
+	esw = devm_kzalloc(dev, sizeof(*esw), GFP_KERNEL);
+	if (!esw)
+		return -ENOMEM;
 
-    esw->dev = dev;
+	esw->dev = dev;
 
-    esw->base = devm_platform_ioremap_resource(pdev, 0);
-    if (IS_ERR(esw->base))
-        return dev_err_probe(dev, PTR_ERR(esw->base),
-                     "failed to map registers\n");
+	esw->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(esw->base))
+		return dev_err_probe(dev, PTR_ERR(esw->base),
+					"failed to map registers\n");
 
-    esw->clk = devm_clk_get_optional_enabled(dev, "ephy");
-    if (IS_ERR(esw->clk))
-        return dev_err_probe(dev, PTR_ERR(esw->clk),
-                     "failed to enable EPHY clock\n");
+	esw->clk = devm_clk_get_optional_enabled(dev, "ephy");
+	if (IS_ERR(esw->clk))
+		return dev_err_probe(dev, PTR_ERR(esw->clk),
+					"failed to enable EPHY clock\n");
 
-    esw->rst_esw = devm_reset_control_get_optional_exclusive(dev, "esw");
-    if (IS_ERR(esw->rst_esw))
-        return dev_err_probe(dev, PTR_ERR(esw->rst_esw),
-                     "failed to get ESW reset\n");
+	esw->rst_esw = devm_reset_control_get_optional_exclusive(dev, "esw");
+	if (IS_ERR(esw->rst_esw))
+		return dev_err_probe(dev, PTR_ERR(esw->rst_esw),
+					"failed to get ESW reset\n");
 
-    esw->rst_ephy = devm_reset_control_get_optional_exclusive(dev, "ephy");
-    if (IS_ERR(esw->rst_ephy))
-        return dev_err_probe(dev, PTR_ERR(esw->rst_ephy),
-                     "failed to get EPHY reset\n");
+	esw->rst_ephy = devm_reset_control_get_optional_exclusive(dev, "ephy");
+	if (IS_ERR(esw->rst_ephy))
+		return dev_err_probe(dev, PTR_ERR(esw->rst_ephy),
+					"failed to get EPHY reset\n");
 
-    /*
-     * Use a normal reset sequence. Any PHY quirks can be handled later
-     * in dedicated PHY driver code.
-     */
-    if (esw->rst_esw) {
-        ret = reset_control_reset(esw->rst_esw);
-        if (ret)
-            return dev_err_probe(dev, ret,
-                         "failed to reset ESW\n");
-    }
+	if (esw->rst_esw) {
+		ret = reset_control_reset(esw->rst_esw);
+		if (ret)
+			return dev_err_probe(dev, ret,
+		"failed to reset ESW\n");
+	}
 
-    if (esw->rst_ephy) {
-        ret = reset_control_reset(esw->rst_ephy);
-        if (ret)
-            return dev_err_probe(dev, ret,
-                         "failed to reset EPHY\n");
-    }
+	if (esw->rst_ephy) {
+		ret = reset_control_reset(esw->rst_ephy);
+		if (ret)
+			return dev_err_probe(dev, ret,
+						"failed to reset EPHY\n");
+	}
 
-    /*
-     * Optional SDM (Switch DMA) syscon.
-     *
-     * SDM is only used for RX steering policy.
-     * Basic switch operation works without it.
-     */
-    sdm_np = of_parse_phandle(dev->of_node, "ralink,sdm", 0);
-    if (sdm_np) {
-	esw->sdm = syscon_node_to_regmap(sdm_np);
-	of_node_put(sdm_np);
+	/*
+	 * Optional SDM (Switch DMA) syscon.
+	 *
+	 * SDM is only used for RX steering policy.
+	 * Basic switch operation works without it.
+	 */
+	sdm_np = of_parse_phandle(dev->of_node, "ralink,sdm", 0);
+	if (sdm_np) {
+		esw->sdm = syscon_node_to_regmap(sdm_np);
+		of_node_put(sdm_np);
 
-	if (IS_ERR(esw->sdm)) {
-		dev_warn(dev,
+		if (IS_ERR(esw->sdm)) {
+			dev_warn(dev,
 			 "SDM syscon unavailable, RX steering disabled\n");
+			esw->sdm = NULL;
+		}
+	} else {
 		esw->sdm = NULL;
 	}
-    } else {
-	esw->sdm = NULL;
-    }
 
-    esw->ds = devm_kzalloc(dev, sizeof(*esw->ds), GFP_KERNEL);
-    if (!esw->ds)
-        return -ENOMEM;
+	esw->ds = devm_kzalloc(dev, sizeof(*esw->ds), GFP_KERNEL);
+	if (!esw->ds)
+		return -ENOMEM;
 
-    esw->ds->dev = dev;
-    esw->ds->priv = esw;
-    esw->ds->ops = &ralink_esw_ops;
-    esw->ds->phylink_mac_ops = &ralink_esw_phylink_mac_ops;
-    esw->ds->num_ports = RALINK_ESW_NUM_PORTS;
-    esw->ds->num_tx_queues = 4;
+	esw->ds->dev = dev;
+	esw->ds->priv = esw;
+	esw->ds->ops = &ralink_esw_ops;
+	esw->ds->phylink_mac_ops = &ralink_esw_phylink_mac_ops;
+	esw->ds->num_ports = RALINK_ESW_NUM_PORTS;
+	esw->ds->num_tx_queues = 4;
 
-    platform_set_drvdata(pdev, esw);
+	platform_set_drvdata(pdev, esw);
 
-    mutex_init(&esw->mdio_lock);
-    ret = ralink_esw_mdio_register(esw);
-    if (ret)
-        return ret;
+	mutex_init(&esw->mdio_lock);
+	ret = ralink_esw_mdio_register(esw);
+	if (ret)
+		return ret;
 
-    mutex_init(&esw->fdb_mutex);
-    mutex_init(&esw->reg_mutex);
+	mutex_init(&esw->fdb_mutex);
+	mutex_init(&esw->reg_mutex);
 
-    ret = dsa_register_switch(esw->ds);
-    if (ret)
-        return dev_err_probe(dev, ret,
-                     "failed to register DSA switch\n");
+	ret = dsa_register_switch(esw->ds);
+	if (ret)
+		return dev_err_probe(dev, ret,
+		"failed to register DSA switch\n");
 
-    ret = ralink_esw_irq_init(esw);
-    if (ret)
-        dev_warn(dev, "IRQ init failed: %d\n", ret);
+	ret = ralink_esw_irq_init(esw);
+	if (ret)
+		dev_warn(dev, "IRQ init failed: %d\n", ret);
 
-    return 0;
+	return 0;
 }
 
 static void ralink_esw_remove(struct platform_device *pdev)
 {
-    struct ralink_esw *esw = platform_get_drvdata(pdev);
-   
-    dsa_unregister_switch(esw->ds);
+	struct ralink_esw *esw = platform_get_drvdata(pdev);
+
+	dsa_unregister_switch(esw->ds);
 }
 
 static const struct of_device_id ralink_esw_of_match[] = {
-    { .compatible = "ralink,rt5350-esw" },
-    { .compatible = "mediatek,mt7628-esw" },
-    { }
+	{ .compatible = "ralink,rt5350-esw" },
+	{ .compatible = "mediatek,mt7628-esw" },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ralink_esw_of_match);
 
 static struct platform_driver ralink_esw_driver = {
-    .probe  = ralink_esw_probe,
-    .remove = ralink_esw_remove,
-    .driver = {
-        .name = "ralink-esw",
-        .of_match_table = ralink_esw_of_match,
-    },
+	.probe  = ralink_esw_probe,
+	.remove = ralink_esw_remove,
+	.driver = {
+	.name = "ralink-esw",
+	.of_match_table = ralink_esw_of_match,
+	},
 };
 
 module_platform_driver(ralink_esw_driver);

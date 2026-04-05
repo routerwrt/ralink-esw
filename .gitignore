@@ -14,4 +14,5 @@ modules.order
 *~
 *.swp
 .DS_Store
-
+.editorconfig
+.clang-format
