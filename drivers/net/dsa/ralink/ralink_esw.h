@@ -7,6 +7,9 @@
 #include <linux/workqueue.h>
 
 #define RALINK_ESW_MDIO_TIMEOUT_US		1000
+#define RALINK_ESW_STATS_POLL_INTERVAL		(2 * HZ)
+#define RALINK_ESW_ATU_TIMEOUT_US		1000
+
 #define RALINK_ESW_NUM_PORTS			7
 #define RALINK_ESW_MAX_FRAME_LEN		1522
 #define RALINK_ESW_MAX_MTU \
@@ -129,13 +132,13 @@
 #define RALINK_ESW_SGC2				0x00e4
 #define   RALINK_ESW_SGC2_P6_RXFC_QUE_EN	BIT(31)
 #define   RALINK_ESW_SGC2_P6_TXFC_WL_EN		BIT(30)
-#define   RALINK_ESW_SGC2_LAN_PMAP		GENMASK(29, 24) /* port0..5 */
+#define   RALINK_ESW_SGC2_LAN_PMAP		GENMASK(29, 24)
 #define   RALINK_ESW_SGC2_SPECIAL_TAG		BIT(23)
-#define   RALINK_ESW_SGC2_PORT6_ID		BIT(22)         /* TX to CPU port 6 */
+#define   RALINK_ESW_SGC2_PORT6_ID		BIT(22)
 #define   RALINK_ESW_SGC2_TX_CPU_TPID_BIT_MAP	GENMASK(22, 16)
 #define   RALINK_ESW_SGC2_P6_TXFC_QUE_EN	BIT(12)
 #define   RALINK_ESW_SGC2_CPU_TPID_EN		BIT(10)
-#define   RALINK_ESW_SGC2_DOUBLE_TAG_EN		GENMASK(6, 0)   /* per-port bitmap */
+#define   RALINK_ESW_SGC2_DOUBLE_TAG_EN		GENMASK(6, 0)
 
 #define RALINK_ESW_SGC2_DOUBLE_TAG_EN_BIT(port) BIT(port)
 
@@ -169,11 +172,9 @@
 #define RALINK_ESW_POC2_UNTAG_EN_BIT(port) \
 	BIT(RALINK_ESW_POC2_UNTAG_EN_SHIFT + (port))
 
-#define RALINK_ESW_STATS_POLL_INTERVAL		(2 * HZ)
-
-#define RALINK_ESW_P0PC				0x00e8 /* Port 0 RX packet counter */
-#define RALINK_ESW_P0TPC			0x0150 /* Port 0 TX packet counter */
-#define RALINK_ESW_PCRI				0x014c /* Packet counter recycle */
+#define RALINK_ESW_P0PC				0x00e8
+#define RALINK_ESW_P0TPC			0x0150
+#define RALINK_ESW_PCRI				0x014c
 
 #define   RALINK_ESW_PKT_CNT_GOOD		GENMASK(15, 0)
 #define   RALINK_ESW_PKT_CNT_BAD		GENMASK(31, 16)
@@ -200,41 +201,38 @@
 #define RALINK_ESW_PLED(_p)			(0x00a4 + ((_p) * 4))
 #define RALINK_ESW_PLED_MODE			GENMASK(3, 0)
 
-/* ---- ATU / MAC table search & write ---- */
-
-#define RALINK_ESW_ATS				0x0084 /* search command */
+/* ATU / MAC table search & write */
+#define RALINK_ESW_ATS				0x0084
 #define   RALINK_ESW_ATS_SEARCH_NEXT_ADDR	BIT(1)
 #define   RALINK_ESW_ATS_BEGIN_SEARCH_ADDR	BIT(0)
 
-#define RALINK_ESW_ATS0				0x0088 /* search status 0 */
-#define   RALINK_ESW_ATS0_SEARCH_RDY		BIT(0)   /* read-clear */
+#define RALINK_ESW_ATS0				0x0088
+#define   RALINK_ESW_ATS0_SEARCH_RDY		BIT(0)
 #define   RALINK_ESW_ATS0_AT_TABLE_END		BIT(1)
 #define   RALINK_ESW_ATS0_R_AGE_FIELD		GENMASK(6, 4)
 #define   RALINK_ESW_ATS0_R_PORT_MAP		GENMASK(14, 8)
 #define   RALINK_ESW_ATS0_R_VID			GENMASK(18, 15)
 #define   RALINK_ESW_ATS0_R_MC_INGRESS		BIT(19)
 
-#define RALINK_ESW_ATS1				0x008c /* search status 1 */
-#define RALINK_ESW_ATS2				0x0090 /* search status 2 */
+#define RALINK_ESW_ATS1				0x008c
+#define RALINK_ESW_ATS2				0x0090
 
-#define RALINK_ESW_WMAD0			0x0094 /* write MAC address 0 */
-#define   RALINK_ESW_WMAD0_W_MAC_DONE		BIT(0)   /* read-clear */
+#define RALINK_ESW_WMAD0			0x0094
+#define   RALINK_ESW_WMAD0_W_MAC_DONE		BIT(0)
 #define   RALINK_ESW_WMAD0_W_MAC_CMD		BIT(1)
 #define   RALINK_ESW_WMAD0_W_AGE_FIELD		GENMASK(6, 4)
 #define   RALINK_ESW_WMAD0_W_PORT_MAP		GENMASK(14, 8)
 #define   RALINK_ESW_WMAD0_W_INDEX		GENMASK(18, 15)
 #define   RALINK_ESW_WMAD0_W_MC_INGRESS		BIT(19)
 
-#define RALINK_ESW_WMAD1			0x0098 /* write MAC address 1 */
-#define RALINK_ESW_WMAD2			0x009c /* write MAC address 2 */
+#define RALINK_ESW_WMAD1			0x0098
+#define RALINK_ESW_WMAD2			0x009c
 
 /* ATU age encoding */
 #define RALINK_ESW_ATU_AGE_INVALID		0
 #define RALINK_ESW_ATU_AGE_STATIC		7
 
-#define RALINK_ESW_ATU_TIMEOUT_US		1000
-
-/* ---- Packed VLAN tables ---- */
+/* Packed VLAN tables */
 #define RALINK_ESW_PVIDC_BASE			0x0040
 #define RALINK_ESW_VLANI_BASE			0x0050
 #define RALINK_ESW_VMSC_BASE			0x0070
@@ -304,6 +302,48 @@ static inline u32 ralink_esw_vub_mask(unsigned int slot)
 {
 	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2,
 					RALINK_ESW_TBL_WID_UTG);
+}
+
+#define RALINK_ESW_RL_MAX_TOKEN         0x3ff
+#define RALINK_ESW_RL_MAX_THRESHOLD     0xffff
+
+#define RALINK_ESW_P01_ING_CTRL         0x0120
+#define RALINK_ESW_P0_ING_THRES         0x012c
+#define RALINK_ESW_P01_EG_CTRL          0x0140
+#define RALINK_ESW_INGRESS_CTRL(_s)         BIT((_s) + 14)
+#define RALINK_ESW_INGRESS_MGMT_BYPASS(_s)  BIT((_s) + 13)
+#define RALINK_ESW_INGRESS_FLOW_CTRL(_s)    BIT((_s) + 12)
+
+#define RALINK_ESW_INGRESS_TICK(_s)         GENMASK((_s) + 11, (_s) + 10)
+#define RALINK_ESW_INGRESS_TOKEN(_s)        GENMASK((_s) + 9, _s)
+
+#define RALINK_ESW_INGRESS_FC_OFF_THRES     GENMASK(31, 16)
+#define RALINK_ESW_INGRESS_FC_ON_THRES      GENMASK(15, 0)
+
+#define RALINK_ESW_EGRESS_CTRL(_s)          BIT((_s) + 12)
+#define RALINK_ESW_EGRESS_TICK(_s)          GENMASK((_s) + 11, (_s) + 10)
+#define RALINK_ESW_EGRESS_TOKEN(_s)         GENMASK((_s) + 9, _s)
+
+static const u32 ralink_esw_rl_tick_us[] = { 512, 128, 32, 8 };
+
+static inline u32 ralink_esw_ing_ctrl_reg(unsigned int port)
+{
+	return RALINK_ESW_P01_ING_CTRL + (port / 2) * 4;
+}
+
+static inline u32 ralink_esw_eg_ctrl_reg(unsigned int port)
+{
+	return RALINK_ESW_P01_EG_CTRL + (port / 2) * 4;
+}
+
+static inline u32 ralink_esw_ing_thres_reg(unsigned int port)
+{
+	return RALINK_ESW_P0_ING_THRES + port * 4;
+}
+
+static inline u16 ralink_esw_rl_shift(unsigned int port)
+{
+	return (port & 1) ? 16 : 0;
 }
 
 struct ralink_esw_port_stats {

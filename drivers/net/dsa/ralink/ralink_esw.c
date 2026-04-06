@@ -8,12 +8,14 @@
 #include <linux/clk.h>
 #include <linux/dsa/8021q.h>
 #include <linux/if_bridge.h>
+#include <linux/math64.h>
 #include <linux/mfd/syscon.h>
 #include <linux/of_mdio.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 #include <net/dsa.h>
+#include <net/pkt_cls.h>
 
 #include "ralink_esw.h"
 
@@ -1501,6 +1503,180 @@ static enum dsa_tag_protocol ralink_esw_get_tag_protocol(struct dsa_switch *ds,
 	return DSA_TAG_PROTO_RALINK;
 }
 
+static int ralink_esw_rl_calc(u64 rate_bps, u32 *tick_sel, u32 *token)
+{
+	u64 rate_Bps = DIV_ROUND_UP_ULL(rate_bps, 8);
+	int i;
+
+	/* Prefer the smallest tick for best accuracy. */
+	for (i = ARRAY_SIZE(ralink_esw_rl_tick_us) - 1; i >= 0; i--) {
+		u64 tok;
+
+		tok = DIV_ROUND_CLOSEST_ULL(rate_Bps *
+				ralink_esw_rl_tick_us[i],
+				1000000ULL);
+		/* Ensure min. representable rate (token must be >= 1) */
+		if (!tok)
+			tok = 1;
+
+		if (tok <= RALINK_ESW_RL_MAX_TOKEN) {
+			*tick_sel = i;
+			*token = tok;
+		return 0;
+		}
+	}
+
+	return -ERANGE;
+}
+
+static int ralink_esw_ingress_program(struct ralink_esw *esw, int port,
+				bool enable, u32 tick, u32 token,
+				u32 threshold, bool mgmt_bypass)
+{
+	u32 reg, thres_reg, mask, set = 0;
+	u32 shift;
+
+	reg = ralink_esw_ing_ctrl_reg(port);
+	thres_reg = ralink_esw_ing_thres_reg(port);
+	shift = ralink_esw_rl_shift(port);
+
+	mask = RALINK_ESW_INGRESS_CTRL(shift) |
+		RALINK_ESW_INGRESS_FLOW_CTRL(shift) |
+		RALINK_ESW_INGRESS_MGMT_BYPASS(shift) |
+		RALINK_ESW_INGRESS_TICK(shift) |
+		RALINK_ESW_INGRESS_TOKEN(shift);
+
+	if (enable) {
+		set |= RALINK_ESW_INGRESS_CTRL(shift);
+		set |= (tick << (shift + 10)) &
+					RALINK_ESW_INGRESS_TICK(shift);
+		set |= (token << shift) & RALINK_ESW_INGRESS_TOKEN(shift);
+
+		if (mgmt_bypass)
+			set |= RALINK_ESW_INGRESS_MGMT_BYPASS(shift);
+
+		ralink_esw_rmw(esw, thres_reg,
+			RALINK_ESW_INGRESS_FC_ON_THRES,
+			FIELD_PREP(RALINK_ESW_INGRESS_FC_ON_THRES,
+			threshold));
+	}
+
+	ralink_esw_rmw(esw, reg, mask, set);
+
+	return 0;
+}
+
+static int ralink_esw_egress_program(struct ralink_esw *esw, int port,
+					bool enable, u32 tick, u32 token)
+{
+	u32 reg, mask, set = 0;
+	u32 shift;
+
+	reg = ralink_esw_eg_ctrl_reg(port);
+	shift = ralink_esw_rl_shift(port);
+
+	mask = RALINK_ESW_EGRESS_CTRL(shift) |
+		RALINK_ESW_EGRESS_TICK(shift) |
+		RALINK_ESW_EGRESS_TOKEN(shift);
+
+	if (enable) {
+		set |= RALINK_ESW_EGRESS_CTRL(shift);
+		set |= (tick << (shift + 10)) & RALINK_ESW_EGRESS_TICK(shift);
+		set |= (token << shift) & RALINK_ESW_EGRESS_TOKEN(shift);
+	}
+
+	ralink_esw_rmw(esw, reg, mask, set);
+
+	return 0;
+}
+
+static int ralink_esw_port_setup_tbf(struct ralink_esw *esw, int port,
+					struct tc_tbf_qopt_offload *tbf)
+{
+	struct tc_ratespec rs;
+	u64 rate_bps;
+	u32 tick, token;
+	int ret;
+
+	if (tbf->command == TC_TBF_DESTROY)
+		return ralink_esw_egress_program(esw, port, false, 0, 0);
+
+	if (tbf->command != TC_TBF_REPLACE)
+		return -EOPNOTSUPP;
+
+	psched_ratecfg_getrate(&rs, &tbf->replace_params.rate);
+	rate_bps = (u64)rs.rate * 8ULL;
+	if (!rate_bps)
+		return -EINVAL;
+
+	if (tbf->replace_params.max_size > RALINK_ESW_RL_MAX_THRESHOLD)
+		return -EOPNOTSUPP;
+
+	ret = ralink_esw_rl_calc(rate_bps, &tick, &token);
+	if (ret)
+		return ret;
+
+	return ralink_esw_egress_program(esw, port, true, tick, token);
+}
+
+static int ralink_esw_port_setup_tc(struct dsa_switch *ds, int port,
+				enum tc_setup_type type, void *type_data)
+{
+	struct ralink_esw *esw = ds->priv;
+
+	if (!dsa_is_user_port(ds, port))
+		return -EOPNOTSUPP;
+
+	switch (type) {
+	case TC_SETUP_QDISC_TBF:
+		return ralink_esw_port_setup_tbf(esw, port, type_data);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int ralink_esw_port_policer_add(struct dsa_switch *ds, int port,
+		struct dsa_mall_policer_tc_entry *policer)
+{
+	struct ralink_esw *esw = ds->priv;
+	u64 rate_bps;
+	u32 tick, token;
+	u32 threshold;
+	int ret;
+
+	if (!dsa_is_user_port(ds, port))
+		return -EOPNOTSUPP;
+
+	if (!policer->rate_bytes_per_sec)
+		return -EINVAL;
+
+	rate_bps = policer->rate_bytes_per_sec * 8ULL;
+
+	ret = ralink_esw_rl_calc(rate_bps, &tick, &token);
+	if (ret)
+		return ret;
+
+	if (!policer->burst)
+		return -EINVAL;
+
+	threshold = min_t(u32, policer->burst,
+			  RALINK_ESW_RL_MAX_THRESHOLD);
+
+	return ralink_esw_ingress_program(esw, port, true,
+					  tick, token,
+					  threshold, true);
+}
+
+static void ralink_esw_port_policer_del(struct dsa_switch *ds, int port)
+{
+	struct ralink_esw *esw = ds->priv;
+
+	if (!dsa_is_user_port(ds, port))
+		return;
+
+	ralink_esw_ingress_program(esw, port, false, 0, 0, 0, false);
+}
+
 static const struct dsa_switch_ops ralink_esw_ops = {
 	.get_tag_protocol	= ralink_esw_get_tag_protocol,
 
@@ -1533,6 +1709,10 @@ static const struct dsa_switch_ops ralink_esw_ops = {
 	.get_strings		= ralink_esw_get_strings,
 	.get_sset_count		= ralink_esw_get_sset_count,
 	.get_ethtool_stats	= ralink_esw_get_ethtool_stats,
+
+	.port_setup_tc		= ralink_esw_port_setup_tc,
+	.port_policer_add	= ralink_esw_port_policer_add,
+	.port_policer_del	= ralink_esw_port_policer_del,
 
 	/* phylink */
 	.phylink_get_caps	= ralink_esw_phylink_get_caps,
