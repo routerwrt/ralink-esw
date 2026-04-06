@@ -27,7 +27,7 @@ static inline void ralink_esw_w32(struct ralink_esw *esw, u32 reg, u32 val)
 	writel_relaxed(val, esw->base + reg);
 }
 
-static inline void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set)
+void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set)
 {
 	u32 val = ralink_esw_r32(esw, reg);
 
@@ -98,7 +98,7 @@ static int ralink_esw_phy_write(struct ralink_esw *esw, int phy, int reg, u16 va
 	ralink_esw_w32(esw, RALINK_ESW_PCR0,
 			RALINK_ESW_PCR0_WT_PHY_CMD |
 			FIELD_PREP(RALINK_ESW_PCR0_WT_DATA, val) |
-		FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
+			FIELD_PREP(RALINK_ESW_PCR0_PHY_REG, reg) |
 			FIELD_PREP(RALINK_ESW_PCR0_PHY_ADDR, phy));
 
 	ret = ralink_esw_mdio_wait(esw, RALINK_ESW_PCR1_WT_DONE);
@@ -1378,12 +1378,12 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	 * - do not program per-port default priority yet
 	 */
 	ralink_esw_rmw(esw, RALINK_ESW_PFC1,
-	       RALINK_ESW_PFC1_CPU_USE_Q1_EN |
-	       RALINK_ESW_PFC1_EN_TOS |
-	       RALINK_ESW_PFC1_EN_VLAN |
-	       RALINK_ESW_PFC1_PRIORITY_OPTION |
-	       RALINK_ESW_PFC1_IGMP_SNOOP,
-	       0);
+		RALINK_ESW_PFC1_CPU_USE_Q1_EN |
+		RALINK_ESW_PFC1_EN_TOS |
+		RALINK_ESW_PFC1_EN_VLAN |
+		RALINK_ESW_PFC1_PRIORITY_OPTION |
+		RALINK_ESW_PFC1_IGMP_SNOOP,
+		0);
 
 	/*
 	 * Switch global control:
@@ -1394,22 +1394,22 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	 * - Set max packet length to support VLAN/DSA frames
 	 */
 	ralink_esw_rmw(esw, RALINK_ESW_SGC,
-	       RALINK_ESW_SGC_BKOFF_ALG |
-	       RALINK_ESW_SGC_LEN_ERR_CHK |
-	       RALINK_ESW_SGC_IP_MULT_RULE |
-	       RALINK_ESW_SGC_RMC_RULE |
-	       RALINK_ESW_SGC_DIS_PKT_TX_ABORT |
-	       RALINK_ESW_SGC_PKT_MAX_LEN |
-	       RALINK_ESW_SGC_BC_STORM_PROT |
-	       RALINK_ESW_SGC_AGING_INTERVAL,
-	       RALINK_ESW_SGC_BKOFF_ALG |
-	       RALINK_ESW_SGC_LEN_ERR_CHK |
-	       FIELD_PREP(RALINK_ESW_SGC_IP_MULT_RULE, 0) |
-	       FIELD_PREP(RALINK_ESW_SGC_RMC_RULE, 1) |
-	       FIELD_PREP(RALINK_ESW_SGC_DIS_PKT_TX_ABORT, 0) |
-	       FIELD_PREP(RALINK_ESW_SGC_PKT_MAX_LEN, 1) |
-	       FIELD_PREP(RALINK_ESW_SGC_BC_STORM_PROT, 0) |
-	       FIELD_PREP(RALINK_ESW_SGC_AGING_INTERVAL, 1));
+		RALINK_ESW_SGC_BKOFF_ALG |
+		RALINK_ESW_SGC_LEN_ERR_CHK |
+		RALINK_ESW_SGC_IP_MULT_RULE |
+		RALINK_ESW_SGC_RMC_RULE |
+		RALINK_ESW_SGC_DIS_PKT_TX_ABORT |
+		RALINK_ESW_SGC_PKT_MAX_LEN |
+		RALINK_ESW_SGC_BC_STORM_PROT |
+		RALINK_ESW_SGC_AGING_INTERVAL,
+		RALINK_ESW_SGC_BKOFF_ALG |
+		RALINK_ESW_SGC_LEN_ERR_CHK |
+		FIELD_PREP(RALINK_ESW_SGC_IP_MULT_RULE, 0) |
+		FIELD_PREP(RALINK_ESW_SGC_RMC_RULE, 1) |
+		FIELD_PREP(RALINK_ESW_SGC_DIS_PKT_TX_ABORT, 0) |
+		FIELD_PREP(RALINK_ESW_SGC_PKT_MAX_LEN, 1) |
+		FIELD_PREP(RALINK_ESW_SGC_BC_STORM_PROT, 0) |
+		FIELD_PREP(RALINK_ESW_SGC_AGING_INTERVAL, 1));
 
        /*
 	* Port control 1 baseline:
@@ -1421,14 +1421,14 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	* STP state will override blocking and learning per port.
 	*/
 	ralink_esw_rmw(esw, RALINK_ESW_POC1,
-	       RALINK_ESW_POC1_DIS_IPMC2CPU |
-	       RALINK_ESW_POC1_BLOCKING |
-	       RALINK_ESW_POC1_DIS_LRNING |
-	       RALINK_ESW_POC1_SA_SECURE_PORT,
-	       FIELD_PREP(RALINK_ESW_POC1_DIS_IPMC2CPU, 0x7f) |
-	       FIELD_PREP(RALINK_ESW_POC1_BLOCKING, 0) |
-	       FIELD_PREP(RALINK_ESW_POC1_DIS_LRNING, 0) |
-	       FIELD_PREP(RALINK_ESW_POC1_SA_SECURE_PORT, 0));
+		RALINK_ESW_POC1_DIS_IPMC2CPU |
+		RALINK_ESW_POC1_BLOCKING |
+		RALINK_ESW_POC1_DIS_LRNING |
+		RALINK_ESW_POC1_SA_SECURE_PORT,
+		FIELD_PREP(RALINK_ESW_POC1_DIS_IPMC2CPU, 0x7f) |
+		FIELD_PREP(RALINK_ESW_POC1_BLOCKING, 0) |
+		FIELD_PREP(RALINK_ESW_POC1_DIS_LRNING, 0) |
+		FIELD_PREP(RALINK_ESW_POC1_SA_SECURE_PORT, 0));
 
 	/* Port control 2 baseline:
 	 * - use per-VLAN untag control
@@ -1438,18 +1438,18 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	 * - do not punt MLD to CPU by default
 	 */
 	ralink_esw_rmw(esw, RALINK_ESW_POC2,
-	       RALINK_ESW_POC2_DIS_UC_PAUSE |
-	       RALINK_ESW_POC2_PER_VLAN_UNTAG_EN |
-	       RALINK_ESW_POC2_ENAGING |
-	       RALINK_ESW_POC2_UNTAG_EN |
-	       RALINK_ESW_POC2_MLD2CPU_EN |
-	       RALINK_ESW_POC2_IPV6_MULT_RULE,
-	       FIELD_PREP(RALINK_ESW_POC2_DIS_UC_PAUSE, 0) |
-	       RALINK_ESW_POC2_PER_VLAN_UNTAG_EN |
-	       FIELD_PREP(RALINK_ESW_POC2_ENAGING, 0x7f) |
-	       FIELD_PREP(RALINK_ESW_POC2_UNTAG_EN, 0) |
-	       FIELD_PREP(RALINK_ESW_POC2_MLD2CPU_EN, 0) |
-	       FIELD_PREP(RALINK_ESW_POC2_IPV6_MULT_RULE, 0));
+		RALINK_ESW_POC2_DIS_UC_PAUSE |
+		RALINK_ESW_POC2_PER_VLAN_UNTAG_EN |
+		RALINK_ESW_POC2_ENAGING |
+		RALINK_ESW_POC2_UNTAG_EN |
+		RALINK_ESW_POC2_MLD2CPU_EN |
+		RALINK_ESW_POC2_IPV6_MULT_RULE,
+		FIELD_PREP(RALINK_ESW_POC2_DIS_UC_PAUSE, 0) |
+		RALINK_ESW_POC2_PER_VLAN_UNTAG_EN |
+		FIELD_PREP(RALINK_ESW_POC2_ENAGING, 0x7f) |
+		FIELD_PREP(RALINK_ESW_POC2_UNTAG_EN, 0) |
+		FIELD_PREP(RALINK_ESW_POC2_MLD2CPU_EN, 0) |
+		FIELD_PREP(RALINK_ESW_POC2_IPV6_MULT_RULE, 0));
 
 	bitmap_zero(esw->vlan_slot, RALINK_ESW_NUM_VLANS);
 
@@ -1695,6 +1695,10 @@ static int ralink_esw_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret,
 		"failed to register DSA switch\n");
+
+	ret = ralink_esw_leds_probe(esw);
+	if (ret)
+		dev_warn(dev, "failed to register ESW LEDs: %d\n", ret);
 
 	ret = ralink_esw_irq_init(esw);
 	if (ret)

@@ -9,6 +9,7 @@
 .tmp_versions/
 Module.symvers
 modules.order
+patch
 
 # Editor / misc
 *~
@@ -16,3 +17,4 @@ modules.order
 .DS_Store
 .editorconfig
 .clang-format
+.vscode/

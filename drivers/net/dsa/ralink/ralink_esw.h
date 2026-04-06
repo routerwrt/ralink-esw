@@ -178,10 +178,27 @@
 #define   RALINK_ESW_PKT_CNT_GOOD		GENMASK(15, 0)
 #define   RALINK_ESW_PKT_CNT_BAD		GENMASK(31, 16)
 
-#define   RALINK_ESW_PCRI_GOOD_PKT_REC(port)    BIT(port)
-#define   RALINK_ESW_PCRI_BADD_PKT_REC(port)    BIT((port) + 8)
-#define   RALINK_ESW_PCRI_TXOK_PKT_REC(port)    BIT((port) + 16)
-#define   RALINK_ESW_PCRI_TCOL_PKT_REC(port)    BIT((port) + 24)
+#define   RALINK_ESW_PCRI_GOOD_PKT_REC(port)	BIT(port)
+#define   RALINK_ESW_PCRI_BADD_PKT_REC(port)	BIT((port) + 8)
+#define   RALINK_ESW_PCRI_TXOK_PKT_REC(port)	BIT((port) + 16)
+#define   RALINK_ESW_PCRI_TCOL_PKT_REC(port)	BIT((port) + 24)
+
+/* HW LEDS */
+#define RALINK_ESW_LED_LINK			0x0
+#define RALINK_ESW_LED_100M			0x1
+#define RALINK_ESW_LED_DUPLEX			0x2
+#define RALINK_ESW_LED_ACTIVITY			0x3
+#define RALINK_ESW_LED_COLLISION		0x4
+#define RALINK_ESW_LED_LINK_ACTIVITY		0x5
+#define RALINK_ESW_LED_DUPLEX_COLLISION		0x6
+#define RALINK_ESW_LED_10M_ACTIVITY		0x7
+#define RALINK_ESW_LED_100M_ACTIVITY		0x8
+#define RALINK_ESW_LED_OFF			0x9
+#define RALINK_ESW_LED_ON			0xa
+#define RALINK_ESW_LED_BLINK			0xb
+
+#define RALINK_ESW_PLED(_p)			(0x00a4 + ((_p) * 4))
+#define RALINK_ESW_PLED_MODE			GENMASK(3, 0)
 
 /* ---- ATU / MAC table search & write ---- */
 
@@ -349,5 +366,13 @@ struct ralink_esw {
 	struct mutex			reg_mutex;
 	bool				stats_running;
 };
+
+#ifdef CONFIG_LEDS_CLASS
+int ralink_esw_leds_probe(struct ralink_esw *esw);
+#else
+static inline int ralink_esw_leds_probe(struct ralink_esw *esw) { return 0; }
+#endif
+
+void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set);
 
 #endif /* _RALINK_ESW_DSA_H_ */
