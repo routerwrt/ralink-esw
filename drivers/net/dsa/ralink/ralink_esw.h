@@ -374,6 +374,13 @@ struct ralink_esw_port {
 	bool				pvid_vlan_filtering_configured;
 };
 
+struct ralink_esw_vlan {
+	u16				vid;
+	u8				member;
+	u8				untag;
+	int				bridge_num;
+};
+
 struct ralink_esw {
 	struct device			*dev;
 	void __iomem			*base;
@@ -391,10 +398,8 @@ struct ralink_esw {
 
 	struct dsa_switch		*ds;
 
-	DECLARE_BITMAP(vlan_slot, RALINK_ESW_NUM_VLANS);
-	u16				vlan_vid[RALINK_ESW_NUM_VLANS];
-	u8				vlan_member[RALINK_ESW_NUM_VLANS];
-	u8				vlan_untag[RALINK_ESW_NUM_VLANS];
+	DECLARE_BITMAP(vlan_idx, RALINK_ESW_NUM_VLANS);
+	struct ralink_esw_vlan		vlan[RALINK_ESW_NUM_VLANS];
 
 	struct ralink_esw_port		ports[RALINK_ESW_NUM_PORTS];
 	int				cpu_port;
