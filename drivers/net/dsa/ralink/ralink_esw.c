@@ -528,7 +528,7 @@ static inline void ralink_esw_set_pvid(struct ralink_esw *esw,
 }
 
 static inline void ralink_esw_set_vlan_vid(struct ralink_esw *esw,
-					unsigned int idx, u16 vid)
+					int idx, u16 vid)
 {
 	ralink_esw_set_field(esw, RALINK_ESW_VLANI_BASE, idx,
 			     RALINK_ESW_TBL_WID_VID,
@@ -536,7 +536,7 @@ static inline void ralink_esw_set_vlan_vid(struct ralink_esw *esw,
 }
 
 static inline void ralink_esw_set_vlan_members(struct ralink_esw *esw,
-					unsigned int idx, u8 members)
+						int idx, u8 members)
 {
 	ralink_esw_set_field(esw, RALINK_ESW_VMSC_BASE, idx,
 				RALINK_ESW_TBL_WID_MSC,
@@ -544,14 +544,14 @@ static inline void ralink_esw_set_vlan_members(struct ralink_esw *esw,
 }
 
 static inline void ralink_esw_set_vlan_untag(struct ralink_esw *esw,
-					     unsigned int idx, u8 untag)
+						int idx, u8 untag)
 {
 	ralink_esw_set_field(esw, RALINK_ESW_VUB_BASE, idx,
 				RALINK_ESW_TBL_WID_UTG,
 				RALINK_ESW_TBL_PER_REG_4, untag);
 }
 
-static void ralink_esw_vlan_write(struct ralink_esw *esw, unsigned int idx)
+static void ralink_esw_vlan_write(struct ralink_esw *esw, int idx)
 {
 	ralink_esw_set_vlan_vid(esw, idx, esw->vlan[idx].vid);
 	ralink_esw_set_vlan_members(esw, idx, esw->vlan[idx].member);
@@ -602,8 +602,7 @@ static void ralink_esw_free_vlan_idx(struct ralink_esw *esw, int i)
 	ralink_esw_vlan_write(esw, i);
 }
 
-static inline u16 ralink_esw_vlan_from_idx(struct ralink_esw *esw,
-					   unsigned int idx)
+static inline u16 ralink_esw_vlan_from_idx(struct ralink_esw *esw, int idx)
 {
 	if (idx >= RALINK_ESW_NUM_VLANS)
 		return RALINK_ESW_VID_NONE;
@@ -669,20 +668,42 @@ static int ralink_esw_port_vlan_add(struct dsa_switch *ds, int port,
 				    struct netlink_ext_ack *extack)
 {
 	struct ralink_esw *esw = ds->priv;
+	struct dsa_port *dp = dsa_to_port(ds, port);
+	unsigned int bridge_num = dsa_port_bridge_num_get(dp);
 	bool untagged = vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED;
 	bool pvid = vlan->flags & BRIDGE_VLAN_INFO_PVID;
 	u16 vid = vlan->vid;
-	int idx, err;
+	int idx;
 
 	if (vid_is_dsa_8021q(vid)) {
 		NL_SET_ERR_MSG_MOD(extack,
 			"Range 3072-4095 reserved for dsa_8021q operation");
 		return -EBUSY;
 	}
+	/* to support multiple aware bridges only update no pvid */
+	if (pvid && vid == 0) {
+		esw->ports[port].pvid_vlan_filtering = 0;
+		esw->ports[port].pvid_vlan_filtering_configured = true;
+		return ralink_esw_port_commit_pvid(esw, port);
+	}
 
-	idx = ralink_esw_alloc_vlan_idx(esw, vid);
-	if (idx < 0)
-		return idx;
+	idx = ralink_esw_find_vlan_idx(esw, vid);
+	if (idx >= 0) {
+		if (bridge_num != esw->vlan[idx].bridge_num) {
+			NL_SET_ERR_MSG_MOD(extack,
+			"VID is in use on an other vlan aware bridge");
+		return -EBUSY;
+		}
+	}
+
+	if (idx < 0) {
+		idx = ralink_esw_alloc_vlan_idx(esw, vid);
+
+		if (idx < 0)
+			return idx;
+
+		esw->vlan[idx].bridge_num = bridge_num;
+	}
 
 	esw->vlan[idx].member |= BIT(port);
 	/* CPU port must always remain tagged */
@@ -694,15 +715,6 @@ static int ralink_esw_port_vlan_add(struct dsa_switch *ds, int port,
 		esw->vlan[idx].untag &= ~BIT(port);
 
 	ralink_esw_vlan_write(esw, idx);
-
-	if (pvid) {
-		esw->ports[port].pvid_vlan_filtering = vid;
-		esw->ports[port].pvid_vlan_filtering_configured = true;
-
-		err = ralink_esw_port_commit_pvid(esw, port);
-		if (err)
-			return err;
-	}
 
 	return 0;
 }
