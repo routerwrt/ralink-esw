@@ -28,10 +28,16 @@ static struct sk_buff *ralink_tag_xmit(struct sk_buff *skb,
 					 RALINK_CPU_TXQ_STANDALONE_BASE);
 	skb_set_queue_mapping(skb, qmap);
 
-	if (br && br_vlan_enabled(br))
-		return skb;
+	if (br && br_vlan_enabled(br)) {
+		unsigned int bridge_num = dsa_port_bridge_num_get(dp);
 
-	tx_vid = dsa_tag_8021q_standalone_vid(dp);
+		if (skb->protocol == htons(ETH_P_8021Q))
+			return skb;
+
+		tx_vid = dsa_tag_8021q_bridge_vid(bridge_num);
+	} else {
+		tx_vid = dsa_tag_8021q_standalone_vid(dp);
+	}
 
 	return dsa_8021q_xmit(skb, netdev, ETH_P_8021Q, tx_vid);
 }
