@@ -36,7 +36,7 @@ void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set)
 	val &= ~mask;
 	val |= (set & mask);
 
-	ralink_esw_w32(esw, val, reg);
+	ralink_esw_w32(esw, reg, val);
 }
 
 /*
