@@ -777,9 +777,12 @@ static int ralink_esw_tag_8021q_vlan_add(struct dsa_switch *ds, int port,
 	if (!dsa_is_user_port(ds, port))
 		return 0;
 
-	idx = ralink_esw_alloc_vlan_idx(esw, vid);
-	if (idx < 0)
+	idx = ralink_esw_find_vlan_idx(esw, vid);
+	if (idx < 0) {
+		idx = ralink_esw_alloc_vlan_idx(esw, vid);
+		if (idx < 0)
 		return idx;
+	}
 
 	esw->vlan[idx].member |= BIT(port) | BIT(esw->cpu_port);
 
