@@ -1534,13 +1534,15 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 	}
 
 	ralink_esw_sdm_set_prio_baseline(esw);
-	ralink_esw_stats_init(esw);
 
 	rtnl_lock();
 	ret = dsa_tag_8021q_register(ds, htons(ETH_P_8021Q));
 	rtnl_unlock();
+	if (ret)
+		return ret;
+	ralink_esw_stats_init(esw);
 
-	return ret;
+	return 0;
 }
 
 static void ralink_esw_teardown(struct dsa_switch *ds)
