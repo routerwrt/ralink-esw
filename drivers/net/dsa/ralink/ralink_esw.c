@@ -28,15 +28,18 @@ static inline void ralink_esw_w32(struct ralink_esw *esw, u32 reg, u32 val)
 {
 	writel_relaxed(val, esw->base + reg);
 }
-
 void ralink_esw_rmw(struct ralink_esw *esw, u32 reg, u32 mask, u32 set)
 {
-	u32 val = ralink_esw_r32(esw, reg);
+	u32 val;
 
+	mutex_lock(&esw->reg_mutex);
+
+	val = ralink_esw_r32(esw, reg);
 	val &= ~mask;
 	val |= (set & mask);
-
 	ralink_esw_w32(esw, reg, val);
+
+	mutex_unlock(&esw->reg_mutex);
 }
 
 /*
@@ -1927,12 +1930,12 @@ static int ralink_esw_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, esw);
 
 	mutex_init(&esw->mdio_lock);
+	mutex_init(&esw->fdb_mutex);
+	mutex_init(&esw->reg_mutex);
+
 	ret = ralink_esw_mdio_register(esw);
 	if (ret)
 		return ret;
-
-	mutex_init(&esw->fdb_mutex);
-	mutex_init(&esw->reg_mutex);
 
 	ret = dsa_register_switch(esw->ds);
 	if (ret)
