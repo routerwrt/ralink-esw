@@ -242,7 +242,7 @@
 #define RALINK_ESW_TBL_PER_REG_2		2
 #define RALINK_ESW_TBL_PER_REG_4		4
 
-#define RALINK_ESW_TBL_WID_VID			16 /* 12 bits used */
+#define RALINK_ESW_TBL_WID_VID			12 /* 12 bits used */
 #define RALINK_ESW_TBL_WID_MSC			8  /* port bitmap */
 #define RALINK_ESW_TBL_WID_UTG			8  /* untag bitmap */
 
@@ -257,52 +257,6 @@ static inline u32 ralink_esw_tbl_mask(u16 idx, u16 per_reg, u16 width)
 	u16 shift = (idx % per_reg) * width;
 
 	return GENMASK(width - 1, 0) << shift;
-}
-
-/* PVID: per port */
-static inline u32 ralink_esw_pvidc_reg(unsigned int port)
-{
-	return ralink_esw_tbl_reg(RALINK_ESW_PVIDC_BASE, port,
-					RALINK_ESW_TBL_PER_REG_2);
-}
-static inline u32 ralink_esw_pvidc_mask(unsigned int port)
-{
-	return ralink_esw_tbl_mask(port, RALINK_ESW_TBL_PER_REG_2,
-					RALINK_ESW_TBL_WID_VID);
-}
-
-/* VLANI/VMSC/VUB: per VLAN table slot 0..15 */
-static inline u32 ralink_esw_vlani_reg(unsigned int slot)
-{
-	return ralink_esw_tbl_reg(RALINK_ESW_VLANI_BASE, slot,
-					RALINK_ESW_TBL_PER_REG_2);
-}
-static inline u32 ralink_esw_vlani_mask(unsigned int slot)
-{
-	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2,
-					RALINK_ESW_TBL_WID_VID);
-}
-
-static inline u32 ralink_esw_vmsc_reg(unsigned int slot)
-{
-	return ralink_esw_tbl_reg(RALINK_ESW_VMSC_BASE, slot,
-					RALINK_ESW_TBL_PER_REG_2);
-}
-static inline u32 ralink_esw_vmsc_mask(unsigned int slot)
-{
-	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2,
-					RALINK_ESW_TBL_WID_MSC);
-}
-
-static inline u32 ralink_esw_vub_reg(unsigned int slot)
-{
-	return ralink_esw_tbl_reg(RALINK_ESW_VUB_BASE, slot,
-					RALINK_ESW_TBL_PER_REG_2);
-}
-static inline u32 ralink_esw_vub_mask(unsigned int slot)
-{
-	return ralink_esw_tbl_mask(slot, RALINK_ESW_TBL_PER_REG_2,
-					RALINK_ESW_TBL_WID_UTG);
 }
 
 #define RALINK_ESW_RL_MAX_TOKEN         0x3ff
