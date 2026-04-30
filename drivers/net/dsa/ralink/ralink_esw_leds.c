@@ -14,7 +14,6 @@ struct ralink_esw_led {
 	struct led_classdev	cdev;
 	struct mutex		lock;
 	u8			port;
-	u8			mode;
 	unsigned long		rules;
 	bool			hw_control;
 };
@@ -26,7 +25,6 @@ static void ralink_esw_led_apply(struct ralink_esw_led *led, u8 mode)
 	mutex_lock(&led->lock);
 	ralink_esw_rmw(led->esw, reg, RALINK_ESW_PLED_MODE,
 		FIELD_PREP(RALINK_ESW_PLED_MODE, mode));
-	led->mode = mode;
 	mutex_unlock(&led->lock);
 }
 

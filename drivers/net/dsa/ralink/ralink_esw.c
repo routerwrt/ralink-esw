@@ -172,8 +172,6 @@ static int ralink_esw_mdio_register(struct ralink_esw *esw)
 		return dev_err_probe(esw->dev, ret,
 				"failed to register MDIO bus\n");
 
-	esw->mdio_bus = bus;
-
 	return 0;
 }
 
@@ -1355,8 +1353,6 @@ static int ralink_esw_port_bridge_flags(struct dsa_switch *ds, int port,
 	if (flags.mask & BR_LEARNING) {
 		bool learning = flags.val & BR_LEARNING;
 
-		esw->ports[port].learning = learning;
-
 		ralink_esw_port_set_learning(esw, port, learning);
 	}
 
@@ -1548,7 +1544,6 @@ static int ralink_esw_setup(struct dsa_switch *ds)
 
 	for (i = 0; i < ds->num_ports; i++) {
 		esw->ports[i].vlan_filtering = false;
-		esw->ports[i].learning = true;
 		esw->ports[i].pvid_tag_8021q = 0;
 		esw->ports[i].pvid_tag_8021q_configured = false;
 		esw->ports[i].pvid_vlan_filtering = 0;

@@ -130,13 +130,8 @@
 #define   RALINK_ESW_SGC_AGING_INTERVAL		GENMASK(3, 0)
 
 #define RALINK_ESW_SGC2				0x00e4
-#define   RALINK_ESW_SGC2_P6_RXFC_QUE_EN	BIT(31)
-#define   RALINK_ESW_SGC2_P6_TXFC_WL_EN		BIT(30)
 #define   RALINK_ESW_SGC2_LAN_PMAP		GENMASK(29, 24)
-#define   RALINK_ESW_SGC2_SPECIAL_TAG		BIT(23)
-#define   RALINK_ESW_SGC2_PORT6_ID		BIT(22)
 #define   RALINK_ESW_SGC2_TX_CPU_TPID_BIT_MAP	GENMASK(22, 16)
-#define   RALINK_ESW_SGC2_P6_TXFC_QUE_EN	BIT(12)
 #define   RALINK_ESW_SGC2_CPU_TPID_EN		BIT(10)
 #define   RALINK_ESW_SGC2_DOUBLE_TAG_EN		GENMASK(6, 0)
 
@@ -162,15 +157,7 @@
 #define   RALINK_ESW_POC2_DIS_UC_PAUSE		GENMASK(22, 16)
 #define   RALINK_ESW_POC2_PER_VLAN_UNTAG_EN	BIT(15)
 #define   RALINK_ESW_POC2_ENAGING		GENMASK(14, 8)
-#define   RALINK_ESW_POC2_ENAGING_SHIFT		8
 #define   RALINK_ESW_POC2_UNTAG_EN		GENMASK(6, 0)
-#define   RALINK_ESW_POC2_UNTAG_EN_SHIFT	0
-
-#define RALINK_ESW_POC2_ENAGING_BIT(port) \
-	BIT(RALINK_ESW_POC2_ENAGING_SHIFT + (port))
-
-#define RALINK_ESW_POC2_UNTAG_EN_BIT(port) \
-	BIT(RALINK_ESW_POC2_UNTAG_EN_SHIFT + (port))
 
 #define RALINK_ESW_P0PC				0x00e8
 #define RALINK_ESW_P0TPC			0x0150
@@ -320,7 +307,6 @@ struct ralink_esw_atu_entry {
 
 struct ralink_esw_port {
 	bool				vlan_filtering;
-	bool				learning;
 
 	u16				pvid_tag_8021q;
 	bool				pvid_tag_8021q_configured;
@@ -347,7 +333,6 @@ struct ralink_esw {
 
 	/* MDIO */
 	struct mutex			mdio_lock;
-	struct mii_bus			*mdio_bus;
 
 	u32				link_state;
 
@@ -364,7 +349,6 @@ struct ralink_esw {
 	struct delayed_work		stats_work;
 	struct ralink_esw_port_stats	stats[RALINK_ESW_NUM_PORTS];
 	struct mutex			reg_mutex;
-	bool				stats_running;
 };
 
 #ifdef CONFIG_LEDS_CLASS
