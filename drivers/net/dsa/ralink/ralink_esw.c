@@ -1084,9 +1084,9 @@ static int ralink_esw_db_to_hw_vid(struct ralink_esw *esw, int port,
 	}
 
 	if (db.type == DSA_DB_BRIDGE &&
-	    esw->ports[port].pvid_vlan_filtering_configured &&
-	    dsa_port_bridge_dev_get(dp) &&
-	    vid == esw->ports[port].pvid_vlan_filtering)
+		esw->ports[port].pvid_vlan_filtering_configured &&
+		dsa_port_bridge_dev_get(dp) &&
+		vid == esw->ports[port].pvid_vlan_filtering)
 		return dsa_tag_8021q_bridge_vid(db.bridge.num);
 
 	return vid;
@@ -1127,7 +1127,7 @@ static int ralink_esw_port_fdb_del(struct dsa_switch *ds, int port,
 				   RALINK_ESW_ATU_AGE_INVALID, false);
 	mutex_unlock(&esw->fdb_mutex);
 
-	return ret;
+	return ret == -ENOENT ? 0 : ret;
 }
 
 static int ralink_esw_port_mdb_add(struct dsa_switch *ds, int port,
@@ -1177,6 +1177,10 @@ static int ralink_esw_port_mdb_del(struct dsa_switch *ds, int port,
 	mutex_lock(&esw->fdb_mutex);
 
 	ret = ralink_esw_atu_find(esw, mdb->addr, mdb_vid, true, &ent);
+	if (ret == -ENOENT) {
+		ret = 0;
+		goto out;
+	}
 	if (ret)
 		goto out;
 
