@@ -1776,7 +1776,15 @@ static const struct dsa_switch_ops ralink_esw_ops = {
 static void ralink_esw_phylink_mac_change(struct ralink_esw *esw, int port,
 					  bool up)
 {
-	struct dsa_port *dp = dsa_to_port(esw->ds, port);
+	struct dsa_switch *ds = esw->ds;
+	struct dsa_port *dp;
+
+	if (!dsa_is_user_port(ds, port))
+		return;
+
+	dp = dsa_to_port(ds, port);
+	if (!dp || !dp->pl)
+		return;
 
 	phylink_mac_change(dp->pl, up);
 }
