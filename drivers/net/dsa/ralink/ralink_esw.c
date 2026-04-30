@@ -754,6 +754,9 @@ static int ralink_esw_tag_8021q_vlan_add(struct dsa_switch *ds, int port,
 	bool pvid = flags & BRIDGE_VLAN_INFO_PVID;
 	int idx, err;
 
+	if (!dsa_is_user_port(ds, port))
+		return 0;
+
 	idx = ralink_esw_alloc_vlan_idx(esw, vid);
 	if (idx < 0)
 		return idx;
@@ -789,6 +792,14 @@ ralink_esw_tag_8021q_vlan_del(struct dsa_switch *ds, int port, u16 vid)
 	const struct dsa_port *dp = dsa_to_port(ds, port);
 	int idx, err;
 
+	if (!dsa_is_user_port(ds, port))
+		return 0;
+
+	/*
+	 * Standalone tag_8021q VIDs are permanent per-user-port forwarding
+	 * domains. Keep them programmed across bridge join/leave so the tagger
+	 * can always target the port when it returns to standalone mode.
+	 */
 	if (vid == dsa_tag_8021q_standalone_vid(dp))
 		return 0;
 
