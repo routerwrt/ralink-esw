@@ -678,6 +678,12 @@ static int ralink_esw_port_vlan_add(struct dsa_switch *ds, int port,
 	u16 vid = vlan->vid;
 	int idx;
 
+	if (dsa_is_cpu_port(ds, port))
+		return 0;
+
+	if (!dsa_is_user_port(ds, port))
+		return -EOPNOTSUPP;
+
 	if (vid_is_dsa_8021q(vid)) {
 		NL_SET_ERR_MSG_MOD(extack,
 			"Range 3072-4095 reserved for dsa_8021q operation");
@@ -713,14 +719,19 @@ static int ralink_esw_port_vlan_add(struct dsa_switch *ds, int port,
 		esw->vlan[idx].bridge_num = bridge_num;
 	}
 
-	esw->vlan[idx].member |= BIT(port);
-	/* CPU port must always remain tagged */
-	untagged = untagged && port != esw->cpu_port;
+	/*
+	 * The ESW has a single global VLAN table. CPU-port membership is kept
+	 * implicit and tagged for every user VLAN, so ignore DSA's separate
+	 * CPU-port VLAN notifications.
+	 */
+	esw->vlan[idx].member |= BIT(port) | BIT(esw->cpu_port);
 
 	if (untagged)
 		esw->vlan[idx].untag |= BIT(port);
 	else
 		esw->vlan[idx].untag &= ~BIT(port);
+
+	esw->vlan[idx].untag &= ~BIT(esw->cpu_port);
 
 	ralink_esw_vlan_write(esw, idx);
 
@@ -734,6 +745,12 @@ static int ralink_esw_port_vlan_del(struct dsa_switch *ds, int port,
 	u16 vid = vlan->vid;
 	int idx;
 
+	if (dsa_is_cpu_port(ds, port))
+	return 0;
+
+	if (!dsa_is_user_port(ds, port))
+		return -EOPNOTSUPP;
+
 	idx = ralink_esw_find_vlan_idx(esw, vid);
 	if (idx < 0)
 		return 0;
@@ -741,10 +758,10 @@ static int ralink_esw_port_vlan_del(struct dsa_switch *ds, int port,
 	esw->vlan[idx].member &= ~BIT(port);
 	esw->vlan[idx].untag &= ~BIT(port);
 
-	ralink_esw_vlan_write(esw, idx);
-
-	if (!esw->vlan[idx].member)
+	if (!(esw->vlan[idx].member & ~BIT(esw->cpu_port)))
 		ralink_esw_free_vlan_idx(esw, idx);
+	else
+		ralink_esw_vlan_write(esw, idx);
 
 	return 0;
 }
