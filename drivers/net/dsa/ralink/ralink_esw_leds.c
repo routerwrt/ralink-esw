@@ -261,7 +261,6 @@ int ralink_esw_leds_probe(struct ralink_esw *esw)
 		led->cdev.hw_control_trigger = "netdev";
 
 		init_data.fwnode = fwnode;
-		init_data.devname_mandatory = true;
 
 		state = led_init_default_state_get(fwnode);
 		switch (state) {

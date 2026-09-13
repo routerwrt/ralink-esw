@@ -21,25 +21,26 @@ static struct sk_buff *ralink_tag_xmit(struct sk_buff *skb,
 {
 	struct dsa_port *dp = dsa_user_to_port(netdev);
 	struct net_device *br = dsa_port_bridge_dev_get(dp);
-	u16 qmap, tx_vid;
+	u16 qmap = skb_get_queue_mapping(skb);
+	u8 pcp = qmap * 2;
+	u16 tx_vid;
 
-	qmap = skb_get_queue_mapping(skb);
 	qmap = ((qmap >> 1) & 1) | (br ? RALINK_CPU_TXQ_BRIDGED_BASE :
 					 RALINK_CPU_TXQ_STANDALONE_BASE);
 	skb_set_queue_mapping(skb, qmap);
 
 	if (br && br_vlan_enabled(br)) {
+		return skb;
+	} else if (br) {
 		unsigned int bridge_num = dsa_port_bridge_num_get(dp);
-
-		if (skb->protocol == htons(ETH_P_8021Q))
-			return skb;
 
 		tx_vid = dsa_tag_8021q_bridge_vid(bridge_num);
 	} else {
 		tx_vid = dsa_tag_8021q_standalone_vid(dp);
 	}
 
-	return dsa_8021q_xmit(skb, netdev, ETH_P_8021Q, tx_vid);
+	return dsa_8021q_xmit(skb, netdev, ETH_P_8021Q,
+			((pcp << VLAN_PRIO_SHIFT) | tx_vid));
 }
 
 /*
@@ -62,6 +63,9 @@ static struct sk_buff *ralink_tag_rcv(struct sk_buff *skb,
 	if (unlikely((tpid & ~RALINK_PORT_MASK) != ETH_P_8021Q))
 		return NULL;
 
+	/* restore normal TPID */
+	hdr->h_vlan_proto = htons(ETH_P_8021Q);
+
 	src_port = tpid & RALINK_PORT_MASK;
 
 	/* Port 0 is ambiguous with plain 0x8100.
@@ -74,11 +78,9 @@ static struct sk_buff *ralink_tag_rcv(struct sk_buff *skb,
 
 	skb->dev =
 		dsa_tag_8021q_find_user(netdev, src_port, switch_id, vid, vbid);
-	if (!skb->dev) {
-		dev_warn_ratelimited(&netdev->dev,
-				     "Couldn't decode source port\n");
+
+	if (!skb->dev) 
 		return NULL;
-	}
 
 	dsa_default_offload_fwd_mark(skb);
 

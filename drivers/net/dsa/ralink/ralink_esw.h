@@ -2,8 +2,14 @@
 #ifndef _RALINK_ESW_DSA_H_
 #define _RALINK_ESW_DSA_H_
 
+#include <linux/bitfield.h>
+#include <linux/bitmap.h>
+#include <linux/bits.h>
+#include <linux/if_ether.h>
 #include <linux/if_vlan.h>
-#include <linux/regmap.h>
+#include <linux/jiffies.h>
+#include <linux/mutex.h>
+#include <linux/types.h>
 #include <linux/workqueue.h>
 
 #define RALINK_ESW_MDIO_TIMEOUT_US		1000
@@ -17,13 +23,6 @@
 
 #define RALINK_ESW_NUM_VLANS			16
 #define RALINK_ESW_VID_NONE			0
-
-#define SDM_RRING				0x0004
-#define   SDM_PRIO_RING_MASK			GENMASK(7, 0)
-#define   SDM_PRIO_RING_BIT(prio)		BIT(prio)
-#define   SDM_PORT_RING_MASK			GENMASK(12, 8) /* port0..4 */
-#define   SDM_PORT_RING_SHIFT			8
-#define   SDM_PORT_RING_BIT(port)		BIT(SDM_PORT_RING_SHIFT + (port))
 
 #define RALINK_ESW_ISR				0x0000
 #define RALINK_ESW_IMR				0x0004
@@ -130,10 +129,17 @@
 #define   RALINK_ESW_SGC_AGING_INTERVAL		GENMASK(3, 0)
 
 #define RALINK_ESW_SGC2				0x00e4
+#define   RALINK_ESW_SGC2_P6_RXFC_QUE_EN	BIT(31)
+#define   RALINK_ESW_SGC2_P6_TXFC_WL_EN		BIT(30)
 #define   RALINK_ESW_SGC2_LAN_PMAP		GENMASK(29, 24)
+#define   RALINK_ESW_SGC2_LAN_PMAP_SHIFT	24
 #define   RALINK_ESW_SGC2_TX_CPU_TPID_BIT_MAP	GENMASK(22, 16)
+#define   RALINK_ESW_SGC2_P6_TXFC_QUE_EN	BIT(12)
 #define   RALINK_ESW_SGC2_CPU_TPID_EN		BIT(10)
 #define   RALINK_ESW_SGC2_DOUBLE_TAG_EN		GENMASK(6, 0)
+
+#define RALINK_ESW_SGC2_LAN_PMAP_BIT(port) \
+	BIT(RALINK_ESW_SGC2_LAN_PMAP_SHIFT + (port))
 
 #define RALINK_ESW_SGC2_DOUBLE_TAG_EN_BIT(port) BIT(port)
 
@@ -158,6 +164,8 @@
 #define   RALINK_ESW_POC2_PER_VLAN_UNTAG_EN	BIT(15)
 #define   RALINK_ESW_POC2_ENAGING		GENMASK(14, 8)
 #define   RALINK_ESW_POC2_UNTAG_EN		GENMASK(6, 0)
+
+#define RALINK_ESW_POC2_UNTAG_EN_BIT(port)	BIT(port)
 
 #define RALINK_ESW_P0PC				0x00e8
 #define RALINK_ESW_P0TPC			0x0150
@@ -195,6 +203,7 @@
 #define   RALINK_ESW_ATS_BEGIN_SEARCH_ADDR	BIT(0)
 
 #define RALINK_ESW_ATS0				0x0028
+#define   RALINK_ESW_ATS0_HASH_ADD_LU		GENMASK(31, 22)
 #define   RALINK_ESW_ATS0_R_PORT_MAP		GENMASK(18, 12)
 #define   RALINK_ESW_ATS0_R_VID			GENMASK(10, 7)
 #define   RALINK_ESW_ATS0_R_AGE_FIELD		GENMASK(6, 4)
@@ -202,10 +211,14 @@
 #define   RALINK_ESW_ATS0_AT_TABLE_END		BIT(1)
 #define   RALINK_ESW_ATS0_SEARCH_RDY		BIT(0)
 
+#define RALINK_ESW_ATU_HASH_MASK		0x3ff
+
 #define RALINK_ESW_ATS1				0x002c
 #define RALINK_ESW_ATS2				0x0030
 
 #define RALINK_ESW_WMAD0			0x0034
+#define   RALINK_ESW_WMAD0_HASH_ADD_CFG		GENMASK(31, 22)
+#define   RALINK_ESW_WMAD0_AT_CFG_IDLE		BIT(19)
 #define   RALINK_ESW_WMAD0_W_PORT_MAP		GENMASK(18, 12)
 #define   RALINK_ESW_WMAD0_W_INDEX		GENMASK(10, 7)
 #define   RALINK_ESW_WMAD0_W_AGE_FIELD		GENMASK(6, 4)
@@ -216,7 +229,6 @@
 #define RALINK_ESW_WMAD1			0x0038
 #define RALINK_ESW_WMAD2			0x003c
 
-/* ATU age encoding */
 #define RALINK_ESW_ATU_AGE_INVALID		0
 #define RALINK_ESW_ATU_AGE_STATIC		7
 
@@ -231,7 +243,7 @@
 
 #define RALINK_ESW_TBL_WID_VID			12 /* 12 bits used */
 #define RALINK_ESW_TBL_WID_MSC			8  /* port bitmap */
-#define RALINK_ESW_TBL_WID_UTG			8  /* untag bitmap */
+#define RALINK_ESW_TBL_WID_UTG			7  /* untag bitmap */
 
 /* Packed lane helper (idx selects lane 0/1 within a 32-bit register) */
 static inline u32 ralink_esw_tbl_reg(u32 base, u16 idx, u16 per_reg)
@@ -249,9 +261,10 @@ static inline u32 ralink_esw_tbl_mask(u16 idx, u16 per_reg, u16 width)
 #define RALINK_ESW_RL_MAX_TOKEN         0x3ff
 #define RALINK_ESW_RL_MAX_THRESHOLD     0xffff
 
-#define RALINK_ESW_P01_ING_CTRL         0x0120
-#define RALINK_ESW_P0_ING_THRES         0x012c
-#define RALINK_ESW_P01_EG_CTRL          0x0140
+#define RALINK_ESW_P01_ING_CTRL			0x011c
+#define RALINK_ESW_P0_ING_THRES			0x0128
+#define RALINK_ESW_P01_EG_CTRL			0x0140
+
 #define RALINK_ESW_INGRESS_CTRL(_s)         BIT((_s) + 14)
 #define RALINK_ESW_INGRESS_MGMT_BYPASS(_s)  BIT((_s) + 13)
 #define RALINK_ESW_INGRESS_FLOW_CTRL(_s)    BIT((_s) + 12)
@@ -266,21 +279,21 @@ static inline u32 ralink_esw_tbl_mask(u16 idx, u16 per_reg, u16 width)
 #define RALINK_ESW_EGRESS_TICK(_s)          GENMASK((_s) + 11, (_s) + 10)
 #define RALINK_ESW_EGRESS_TOKEN(_s)         GENMASK((_s) + 9, _s)
 
-static const u32 ralink_esw_rl_tick_us[] = { 512, 128, 32, 8 };
-
 static inline u32 ralink_esw_ing_ctrl_reg(unsigned int port)
 {
 	return RALINK_ESW_P01_ING_CTRL + (port / 2) * 4;
 }
 
-static inline u32 ralink_esw_eg_ctrl_reg(unsigned int port)
-{
-	return RALINK_ESW_P01_EG_CTRL + (port / 2) * 4;
-}
-
 static inline u32 ralink_esw_ing_thres_reg(unsigned int port)
 {
 	return RALINK_ESW_P0_ING_THRES + port * 4;
+}
+
+static const u32 ralink_esw_rl_tick_us[] = { 512, 128, 32, 8 };
+
+static inline u32 ralink_esw_eg_ctrl_reg(unsigned int port)
+{
+	return RALINK_ESW_P01_EG_CTRL + (port / 2) * 4;
 }
 
 static inline u16 ralink_esw_rl_shift(unsigned int port)
@@ -296,13 +309,14 @@ struct ralink_esw_port_stats {
 };
 
 struct ralink_esw_atu_entry {
-	u8				mac[ETH_ALEN];
-	u8				port_mask;
-	u8				vlan_idx;
-	u8				age_field;
-	u16				vid;
-	bool				is_static;
-	bool				is_multicast;
+	u8 mac[ETH_ALEN];
+	u8 port_mask;
+	u8 vlan_idx;
+	u8 age_field;
+	u16 vid;
+	u16 hash_addr;
+	bool is_multicast;
+	bool is_static;
 };
 
 struct ralink_esw_port {
@@ -322,33 +336,43 @@ struct ralink_esw_vlan {
 	int				bridge_num;
 };
 
+enum ralink_esw_untag_ctrl {
+	RALINK_ESW_UNTAG_PER_VLAN, /* VUB table: untag mask per VID */
+	RALINK_ESW_UNTAG_PER_PORT, /* POC2 bit: untag everything on port */
+};
+
+struct ralink_esw_soc_data {
+	const char		*name;
+	enum ralink_esw_untag_ctrl untag_ctrl;
+	bool			has_tx_cntr;
+};
+
 struct ralink_esw {
-	struct device			*dev;
-	void __iomem			*base;
+	struct device				*dev;
+	void __iomem				*base;
 
-	struct clk			*clk;
-	struct reset_control		*rst_esw;
-	struct reset_control		*rst_ephy;
-	struct regmap			*sdm;
+	struct clk				*clk;
+	struct reset_control			*rst_esw;
+	struct reset_control			*rst_ephy;
 
+	const struct ralink_esw_soc_data	*soc;
 	/* MDIO */
-	struct mutex			mdio_lock;
+	struct mutex				mdio_lock;
 
-	u32				link_state;
-
-	struct dsa_switch		*ds;
+	struct dsa_switch			*ds;
 
 	DECLARE_BITMAP(vlan_idx, RALINK_ESW_NUM_VLANS);
-	struct ralink_esw_vlan		vlan[RALINK_ESW_NUM_VLANS];
+	struct ralink_esw_vlan			vlan[RALINK_ESW_NUM_VLANS];
 
-	struct ralink_esw_port		ports[RALINK_ESW_NUM_PORTS];
-	int				cpu_port;
+	struct ralink_esw_port			ports[RALINK_ESW_NUM_PORTS];
+	u8					user_port_mask;
+	int					cpu_port;
 
-	struct mutex			fdb_mutex;
+	struct mutex				fdb_mutex;
 
-	struct delayed_work		stats_work;
-	struct ralink_esw_port_stats	stats[RALINK_ESW_NUM_PORTS];
-	struct mutex			reg_mutex;
+	struct delayed_work			stats_work;
+	struct ralink_esw_port_stats		stats[RALINK_ESW_NUM_PORTS];
+	struct mutex				reg_mutex;
 };
 
 #ifdef CONFIG_LEDS_CLASS
