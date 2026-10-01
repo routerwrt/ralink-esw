@@ -795,8 +795,10 @@ static u16 ralink_esw_atu_hash(const u8 *mac)
 static int ralink_esw_atu_wait_ready(struct ralink_esw *esw, u32 *ats0)
 {
 	return readl_poll_timeout(esw->base + RALINK_ESW_ATS0, *ats0,
-				  *ats0 & RALINK_ESW_ATS0_SEARCH_RDY,
-				  1, RALINK_ESW_ATU_TIMEOUT_US);
+				 *ats0 & (RALINK_ESW_ATS0_SEARCH_RDY |
+					  RALINK_ESW_ATS0_AT_TABLE_END),
+				 1, RALINK_ESW_ATU_TIMEOUT_US);
+
 }
 
 static int ralink_esw_atu_wait_cfg_idle(struct ralink_esw *esw)
@@ -859,6 +861,13 @@ static int ralink_esw_atu_read_entry(struct ralink_esw *esw,
 	ats2 = ralink_esw_r32(esw, RALINK_ESW_ATS2);
 
 	*end = ats0 & RALINK_ESW_ATS0_AT_TABLE_END;
+
+	/*
+	 * End-of-table without SEARCH_RDY means there is no entry
+	 * associated with this result.
+	 */
+	if (!(ats0 & RALINK_ESW_ATS0_SEARCH_RDY))
+		return 0;
 
 	ent->age_field = FIELD_GET(RALINK_ESW_ATS0_R_AGE_FIELD, ats0);
 	if (!ent->age_field)
