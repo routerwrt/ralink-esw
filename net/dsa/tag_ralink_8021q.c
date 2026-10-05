@@ -22,7 +22,7 @@ static struct sk_buff *ralink_tag_xmit(struct sk_buff *skb,
 	struct dsa_port *dp = dsa_user_to_port(netdev);
 	struct net_device *br = dsa_port_bridge_dev_get(dp);
 	u16 qmap = skb_get_queue_mapping(skb);
-	u8 pcp = qmap * 2;
+	u8 pcp = (qmap & 0x3) << 1;
 	u16 tx_vid;
 
 	qmap = ((qmap >> 1) & 1) | (br ? RALINK_CPU_TXQ_BRIDGED_BASE :
@@ -39,8 +39,17 @@ static struct sk_buff *ralink_tag_xmit(struct sk_buff *skb,
 		tx_vid = dsa_tag_8021q_standalone_vid(dp);
 	}
 
-	return dsa_8021q_xmit(skb, netdev, ETH_P_8021Q,
-			((pcp << VLAN_PRIO_SHIFT) | tx_vid));
+	if (skb_vlan_tag_present(skb)) {
+		/* Existing customer/user VLAN must become the inner tag. */
+		skb = __vlan_hwaccel_push_inside(skb);
+		if (!skb)
+			return NULL;
+	}
+
+	__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
+				((pcp << VLAN_PRIO_SHIFT) | tx_vid));
+
+	return skb;
 }
 
 /*
