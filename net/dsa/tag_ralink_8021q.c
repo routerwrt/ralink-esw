@@ -70,6 +70,7 @@ static struct sk_buff *ralink_tag_rcv(struct sk_buff *skb,
 
 	/* Port 0 is ambiguous with plain 0x8100.
 	 * Do not trust it and let tag_8021q decoding handle it.
+	 * For external switches this is always p0
 	 */
 	if (!src_port)
 		src_port = -1;
@@ -88,8 +89,8 @@ static struct sk_buff *ralink_tag_rcv(struct sk_buff *skb,
 }
 
 static const struct dsa_device_ops ralink_tag_ops = {
-	.name = "ralink",
-	.proto = DSA_TAG_PROTO_RALINK,
+	.name = "ralink-8021q",
+	.proto = DSA_TAG_PROTO_RALINK_8021Q,
 	.xmit = ralink_tag_xmit,
 	.rcv = ralink_tag_rcv,
 	.needed_headroom = VLAN_HLEN,
