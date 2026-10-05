@@ -794,11 +794,17 @@ static u16 ralink_esw_atu_hash(const u8 *mac)
 
 static int ralink_esw_atu_wait_ready(struct ralink_esw *esw, u32 *ats0)
 {
-	return readl_poll_timeout(esw->base + RALINK_ESW_ATS0, *ats0,
+	int ret;
+
+	ret = readl_poll_timeout(esw->base + RALINK_ESW_ATS0, *ats0,
 				 *ats0 & (RALINK_ESW_ATS0_SEARCH_RDY |
 					  RALINK_ESW_ATS0_AT_TABLE_END),
 				 1, RALINK_ESW_ATU_TIMEOUT_US);
 
+	if (ret)
+		dev_err(esw->dev, "ATU wait ready timeout ATS0=%08x\n", *ats0);
+
+	return ret;
 }
 
 static int ralink_esw_atu_wait_cfg_idle(struct ralink_esw *esw)
@@ -823,10 +829,32 @@ static int ralink_esw_atu_cmd(struct ralink_esw *esw, bool first, u32 *ats0)
 {
 	u32 cmd = first ? RALINK_ESW_ATS_BEGIN_SEARCH_ADDR :
 			  RALINK_ESW_ATS_SEARCH_NEXT_ADDR;
+	int ret;
+
+	if (first) {
+		ret = ralink_esw_atu_wait_cfg_idle(esw);
+		if (ret) {
+					dev_err(esw->dev,
+			"ATU %s idle timeout: ATS=%08x ATS0=%08x\n",
+			first ? "begin" : "next",
+			ralink_esw_r32(esw, RALINK_ESW_ATS), *ats0);
+
+			return ret;
+		}
+	}
+	/* Consume stale result/status from previous lookup. */
+	ralink_esw_r32(esw, RALINK_ESW_ATS0);
 
 	ralink_esw_w32(esw, RALINK_ESW_ATS, cmd);
 
-	return ralink_esw_atu_wait_ready(esw, ats0);
+	ret = ralink_esw_atu_wait_ready(esw, ats0);
+	if (ret)
+		dev_err(esw->dev,
+			"ATU %s timeout: ATS=%08x ATS0=%08x\n",
+			first ? "begin" : "next",
+			ralink_esw_r32(esw, RALINK_ESW_ATS), *ats0);
+
+			return ret;
 }
 
 static void ralink_esw_atu_mac_from_regs(u32 ats1, u32 ats2, u8 *mac)
@@ -1714,7 +1742,7 @@ static enum dsa_tag_protocol ralink_esw_get_tag_protocol(struct dsa_switch *ds,
 						 int port,
 						 enum dsa_tag_protocol mp)
 {
-	return DSA_TAG_PROTO_RALINK;
+	return DSA_TAG_PROTO_RALINK_8021Q;
 }
 
 static int ralink_esw_rl_calc(u64 rate_bps, u32 *tick_sel, u32 *token)
