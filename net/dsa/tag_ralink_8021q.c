@@ -7,6 +7,8 @@
 #include "tag.h"
 #include "tag_8021q.h"
 
+#define RALINK_8021Q_NAME	"ralink-8021q"
+
 #define RALINK_CPU_TXQ_BRIDGED_BASE 0 /* TX0/TX1 */
 #define RALINK_CPU_TXQ_STANDALONE_BASE BIT(1) /* TX2/TX3 */
 
@@ -29,9 +31,10 @@ static struct sk_buff *ralink_tag_xmit(struct sk_buff *skb,
 					 RALINK_CPU_TXQ_STANDALONE_BASE);
 	skb_set_queue_mapping(skb, qmap);
 
-	if (br && br_vlan_enabled(br)) {
+	if (br && br_vlan_enabled(br))
 		return skb;
-	} else if (br) {
+
+	if (br) {
 		unsigned int bridge_num = dsa_port_bridge_num_get(dp);
 
 		tx_vid = dsa_tag_8021q_bridge_vid(bridge_num);
@@ -89,8 +92,15 @@ static struct sk_buff *ralink_tag_rcv(struct sk_buff *skb,
 	skb->dev =
 		dsa_tag_8021q_find_user(netdev, src_port, switch_id, vid, vbid);
 
-	if (!skb->dev) 
+	/*
+	 * Frames left by the bootloader may reach us before DSA tagging is
+	 * configured and therefore have no decodable source port. Drop them
+	 * silently.
+	 */ 
+	if (!skb->dev) {
+		kfree_skb(skb);
 		return NULL;
+	}
 
 	dsa_default_offload_fwd_mark(skb);
 
@@ -98,15 +108,17 @@ static struct sk_buff *ralink_tag_rcv(struct sk_buff *skb,
 }
 
 static const struct dsa_device_ops ralink_tag_ops = {
-	.name = "ralink-8021q",
-	.proto = DSA_TAG_PROTO_RALINK_8021Q,
-	.xmit = ralink_tag_xmit,
-	.rcv = ralink_tag_rcv,
-	.needed_headroom = VLAN_HLEN,
+
+	.name			= RALINK_8021Q_NAME,
+	.proto			= DSA_TAG_PROTO_RALINK_8021Q,
+	.xmit			= ralink_tag_xmit,
+	.rcv			= ralink_tag_rcv,
+	.needed_headroom	= VLAN_HLEN,
+
 };
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Ralink ESW DSA tagger");
-MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_RALINK, "ralink");
-
+MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_RALINK_8021Q,
+			    RALINK_8021Q_NAME);
 module_dsa_tag_driver(ralink_tag_ops);
