@@ -1,8 +1,25 @@
 # SPDX-License-Identifier: GPL-2.0-only
-config NET_DSA_RALINK
-	tristate "Ralink ESW Switch support"
-	depends on HAS_IOMEM
-	depends on NET_DSA
-	select NET_DSA_TAG_RALINK_8021Q
+ config NET_RALINK_ESW
+        tristate "Ralink embedded switch support"
+        depends on HAS_IOMEM
+
+config NET_DSA_RALINK_ESW
+        bool "DSA support for Ralink ESW"
+        depends on NET_RALINK_ESW
+        depends on NET_DSA
+        select NET_DSA_TAG_RALINK_8021Q
 	help
-	  This driver adds support for Ralink ESW switches.
+	  This driver adds support for Ralink ESW switch.
+
+config NET_RALINK_MT7620_GSW
+        tristate "MediaTek MT7620 GSW support"
+        depends on SOC_MT7620
+        depends on HAS_IOMEM
+
+config NET_DSA_MT7620_GSW
+        bool "DSA support for MT7620 GSW"
+        depends on NET_RALINK_MT7620_GSW
+        depends on NET_DSA
+        select NET_DSA_TAG_RALINK_8021Q
+        help
+	  This driver adds support for Ralink GSW switch.
