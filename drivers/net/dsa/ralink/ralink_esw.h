@@ -369,6 +369,7 @@ struct ralink_esw {
 	int					cpu_port;
 
 	struct mutex				fdb_mutex;
+	struct mutex				stats_mutex;
 
 	struct delayed_work			stats_work;
 	struct ralink_esw_port_stats		stats[RALINK_ESW_NUM_PORTS];

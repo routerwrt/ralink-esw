@@ -416,7 +416,7 @@ static void ralink_esw_stats_update(struct ralink_esw *esw)
 	u32 recycle = 0;
 	int port;
 
-	mutex_lock(&esw->reg_mutex);
+	mutex_lock(&esw->stats_mutex);
 	for (port = 0; port < ds->num_ports; port++) {
 		u32 rx, tx;
 
@@ -449,7 +449,7 @@ static void ralink_esw_stats_update(struct ralink_esw *esw)
 
 	ralink_esw_w32(esw, RALINK_ESW_PCRI, recycle);
 
-	mutex_unlock(&esw->reg_mutex);
+	mutex_unlock(&esw->stats_mutex);
 }
 
 static void ralink_esw_stats_work(struct work_struct *work)
@@ -518,7 +518,7 @@ static void ralink_esw_get_ethtool_stats(struct dsa_switch *ds, int port,
 	if (!dsa_is_user_port(ds, port))
 		return;
 
-	mutex_lock(&esw->reg_mutex);
+	mutex_lock(&esw->stats_mutex);
 
 	data[0] = esw->stats[port].rx_good_pkts;
 	data[1] = esw->stats[port].rx_bad_pkts;
@@ -528,7 +528,7 @@ static void ralink_esw_get_ethtool_stats(struct dsa_switch *ds, int port,
 		data[3] = esw->stats[port].tx_bad_pkts;
 	}
 
-	mutex_unlock(&esw->reg_mutex);
+	mutex_unlock(&esw->stats_mutex);
 }
 
 static inline void ralink_esw_set_field(struct ralink_esw *esw, u32 base,
@@ -2028,6 +2028,7 @@ static int ralink_esw_probe(struct platform_device *pdev)
 
 	mutex_init(&esw->mdio_lock);
 	mutex_init(&esw->fdb_mutex);
+	mutex_init(&esw->stats_mutex);
 	mutex_init(&esw->reg_mutex);
 
 	ret = ralink_esw_mdio_register(esw);
