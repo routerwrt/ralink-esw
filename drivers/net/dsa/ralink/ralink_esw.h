@@ -356,8 +356,6 @@ struct ralink_esw {
 	struct reset_control			*rst_ephy;
 
 	const struct ralink_esw_soc_data	*soc;
-	/* MDIO */
-	struct mutex				mdio_lock;
 
 	struct dsa_switch			*ds;
 
