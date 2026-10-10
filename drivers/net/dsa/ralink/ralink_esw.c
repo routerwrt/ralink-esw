@@ -1913,10 +1913,6 @@ static const struct dsa_switch_ops ralink_esw_ops = {
 	.get_sset_count		= ralink_esw_get_sset_count,
 	.get_ethtool_stats	= ralink_esw_get_ethtool_stats,
 
-	.port_setup_tc		= ralink_esw_port_setup_tc,
-	.port_policer_add	= ralink_esw_port_policer_add,
-	.port_policer_del	= ralink_esw_port_policer_del,
-
 	/* phylink */
 	.phylink_get_caps	= ralink_esw_phylink_get_caps,
 };
@@ -1979,7 +1975,15 @@ static int ralink_esw_probe(struct platform_device *pdev)
 
 	esw->ds->dev = dev;
 	esw->ds->priv = esw;
-	esw->ds->ops = &ralink_esw_ops;
+	esw->ops = ralink_esw_ops;
+
+	if (esw->soc->has_rate_limit) {
+		esw->ops.port_setup_tc = ralink_esw_port_setup_tc;
+		esw->ops.port_policer_add = ralink_esw_port_policer_add;
+		esw->ops.port_policer_del = ralink_esw_port_policer_del;
+	}
+
+	esw->ds->ops = &esw->ops;
 	esw->ds->phylink_mac_ops = &ralink_esw_phylink_mac_ops;
 	esw->ds->num_ports = RALINK_ESW_NUM_PORTS;
 	esw->ds->max_num_bridges = DSA_TAG_8021Q_MAX_NUM_BRIDGES;
@@ -2018,18 +2022,21 @@ static const struct ralink_esw_soc_data rt305x_data = {
 	.name = "rt305x",
 	.untag_ctrl = RALINK_ESW_UNTAG_PER_PORT,
 	.has_tx_cntr = false,
+	.has_rate_limit = false,
 };
 
 static const struct ralink_esw_soc_data rt5350_data = {
 	.name = "rt5350",
 	.untag_ctrl = RALINK_ESW_UNTAG_PER_VLAN,
 	.has_tx_cntr = true,
+	.has_rate_limit = true,
 };
 
 static const struct ralink_esw_soc_data mt76x8_data = {
 	.name = "mt76x8",
 	.untag_ctrl = RALINK_ESW_UNTAG_PER_VLAN,
 	.has_tx_cntr = true,
+	.has_rate_limit = true,
 };
 
 static const struct of_device_id ralink_esw_of_match[] = {

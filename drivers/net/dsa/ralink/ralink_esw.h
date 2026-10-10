@@ -345,6 +345,7 @@ struct ralink_esw_soc_data {
 	const char		*name;
 	enum ralink_esw_untag_ctrl untag_ctrl;
 	bool			has_tx_cntr;
+	bool			has_rate_limit;
 };
 
 struct ralink_esw {
@@ -358,6 +359,7 @@ struct ralink_esw {
 	const struct ralink_esw_soc_data	*soc;
 
 	struct dsa_switch			*ds;
+	struct dsa_switch_ops			ops;
 
 	DECLARE_BITMAP(vlan_idx, RALINK_ESW_NUM_VLANS);
 	struct ralink_esw_vlan			vlan[RALINK_ESW_NUM_VLANS];
